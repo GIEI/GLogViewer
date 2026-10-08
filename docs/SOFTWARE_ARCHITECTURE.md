@@ -1,6 +1,6 @@
 # Software Architecture
 
-**Status:** proposed 1.0 design with 0.1–0.4 implemented and validated on Windows/Linux; the first 0.5 TUI slice is implemented and awaits Linux PTY validation. Full historical navigation and TUI follow integration remain. The behavioral contract is in [Technical Specification](TECHNICAL_SPECIFICATION.md), and delivery stages are in the [roadmap](ROADMAP.md).
+**Status:** 1.0 target architecture. Milestones 0.1–0.5 are implemented; Windows CLI tests and the expanded Linux PTY suite have passed. Formal release benchmarking, broader platform validation, and macOS testing remain. The behavioral contract is in [Technical Specification](TECHNICAL_SPECIFICATION.md), and delivery stages are in the [roadmap](ROADMAP.md).
 
 ## 1. Architectural goals
 
@@ -41,7 +41,7 @@ flowchart LR
 | `stats` | Exact physical/parsed/rejected/selected and per-level counts | Fixed-bin timeline and bounded Space-Saving estimates. |
 | `export` | Stream raw text or CSV with escaping, UTF-8 replacement, and short-write handling | Consumes selected entries immediately; protects existing files by default. |
 | `follow` | Poll, detect append/truncation/replacement, wait for complete records, and maintain reader state | Repositions the shared reader for the pipeline. |
-| `tui` | Input, bounded viewport, search, dynamic filter edits, help, clipped rendering | Retains 256 rows with 1 KiB previews; historical checkpoints and follow integration remain. |
+| `tui` | Input, bounded viewport, search, severity jumps, context view, live follow, resize handling, dynamic filter edits, help, clipped rendering | Retains 256 rows with 1 KiB previews and stores navigation/context checkpoints in temporary files. |
 | `platform` | 64-bit seek/stat, sleep, file identity, terminal mode and input | POSIX and Win32 implementations with a common header. |
 
 Proposed layout:
@@ -105,7 +105,7 @@ This design follows the algorithmic distinction explained by [Russ Cox](https://
 
 ## 6. TUI and large-file navigation
 
-The TUI keeps a fixed-size viewport cache, a fixed-size ring of nearby selected rows, and sparse byte-offset checkpoints. A checkpoint maps a source line number to a byte offset. Checkpoints are capped; when the cap is reached, spacing grows and older points are coalesced. Jumping to a distant location seeks to the nearest retained checkpoint and rescans forward. This bounds memory while allowing navigation with occasional latency. The status line distinguishes “scan in progress” from a complete result count.
+The TUI keeps a fixed-size viewport cache and a fixed-size ring of nearby selected rows. A temporary file stores one checkpoint per 128 selected rows; each checkpoint maps the selected-row sequence to a source line number and byte offset. To display a region outside the cache, the TUI seeks to the preceding checkpoint, reapplies the active selectors, and reads forward until the requested rows are cached. This keeps heap use fixed while allowing navigation with latency bounded by the number of selected rows between checkpoints. The status line distinguishes “scan in progress” from a complete result count.
 
 Search and filter edits increment a generation ID. Scan slices check it and cancel stale work. Rendering operates only on the visible rows. Log text is sanitized for display by replacing control bytes and clipping to terminal width, then match spans are styled with ANSI attributes. A resize recomputes the viewport but does not reparse the whole file. The TUI event loop interleaves nonblocking input, scan slices, follow polling, and screen refresh; no background threads are required in v1.
 
@@ -139,7 +139,7 @@ The core sees `platform_file_open`, `platform_file_seek64`, `platform_file_ident
 | 0.2 implemented | Syslog/HTTP/custom parsers, detection, filter-expression compiler | Core CLI checks pass on Windows and Linux; broader golden fixtures remain part of release hardening. |
 | 0.3 implemented | CSV/text export, exact record/level statistics, timeline, bounded estimates | Windows tests pass; large sample tests also pass on Linux. |
 | 0.4 implemented | Batch follow controller | Windows and Linux append/partial/truncate/from-start/rotation/Ctrl-C tests pass. |
-| 0.5 in progress | Initial TUI with bounded viewport, search, filters, and help | Windows build and non-terminal checks pass; POSIX PTY scenario awaits Linux execution; historical navigation remains. |
+| 0.5 complete | TUI with bounded viewport, full-scan navigation, search, filters, context, and follow | Windows build and non-terminal checks pass; expanded Linux PTY scenario passes. Manual Windows Terminal and macOS checks remain in release validation. |
 | 0.9–1.0 | Hardening, benchmark, documentation, release packaging | Published evidence for every 1.0 gate. |
 
 The detailed scope and pass criteria for each release are in [Roadmap to Version 1.0](ROADMAP.md).

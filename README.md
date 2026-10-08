@@ -1,6 +1,6 @@
 # GLogViewer
 
-GLogViewer is a cross-platform, dependency-free C99 tool for exploring large structured log files from a command line or terminal interface. The proposed executable is `logview`. The batch CLI supports raw and JSON Lines input, syslog RFC 3164/5424, Apache/Nginx access logs, custom patterns, format detection, compound filters, regex, text/CSV export, exact record/level counts, a timestamp timeline, estimated frequent field values, and follow mode with truncation and rotation detection. An initial TUI supports a bounded viewport, regex search, filter edits, and help; full-file navigation is still in development. macOS validation is deferred to the 1.0 MVP. See the [roadmap](docs/ROADMAP.md) for remaining work to 1.0.
+GLogViewer is a cross-platform, dependency-free C99 tool for exploring large structured log files from a command line or terminal interface. The executable is `logview`. The batch CLI supports raw and JSON Lines input, syslog RFC 3164/5424, Apache/Nginx access logs, custom patterns, format detection, compound filters, regex, text/CSV export, exact record/level counts, a timestamp timeline, estimated frequent field values, and follow mode with truncation and rotation detection. The TUI supports a bounded viewport, checkpoint-backed navigation and regex search across the full scan, error/warning jumps, physical context lines, filter edits, and live follow. The 0.5 interactive milestone is implemented; release validation remains in development. macOS validation is deferred to the 1.0 MVP. See the [roadmap](docs/ROADMAP.md) for remaining work to 1.0.
 
 ## Version 1.0 target
 
@@ -39,7 +39,7 @@ Available formats are `raw` (the default), `jsonl`, `syslog3164`, `syslog5424`, 
 
 ## More examples
 
-Text/CSV export, statistics, and follow are available. The TUI is in progress and currently retains a bounded window of recent selected records. Timestamp timeline output uses a second streaming pass; frequent field/value counts are bounded estimates.
+Text/CSV export, statistics, and follow are available. The TUI uses a bounded row cache and a temporary on-disk checkpoint index for navigation across the full scan. Timestamp timeline output uses a second streaming pass; frequent field/value counts are bounded estimates.
 
 ```text
 logview app.log --format custom --pattern "%{TIMESTAMP:ts} %{LEVEL:lvl} %{MESSAGE:msg}" --filter "level=ERROR" --regex "timeout"
@@ -56,7 +56,7 @@ logview --tui app.log
 - [Feature catalogue](docs/FEATURES.md): scope, user workflows, competing tools, and priorities.
 - [Technical specification](docs/TECHNICAL_SPECIFICATION.md): syntax, data contracts, limits, performance targets, and acceptance tests.
 - [Software architecture](docs/SOFTWARE_ARCHITECTURE.md): modules, data flow, platform boundaries, and implementation sequence.
-- [User manual](docs/USER_MANUAL.md): proposed commands, format selection, filters, navigation, exports, and troubleshooting.
+- [User manual](docs/USER_MANUAL.md): commands, format selection, filters, navigation, exports, and troubleshooting.
 - [Validation notes](docs/VALIDATION.md): local platform checks and the large syslog/HTTP sample results.
 
 The documents distinguish implemented behavior from the 1.0 design target. The source list in the technical specification records the standards, product documentation, and research used to shape the design.
@@ -67,4 +67,4 @@ All repository content and every source comment must be written in English. See 
 
 ## Status and license
 
-Status: 0.3 reporting milestone implemented; cross-platform and release validation remain before 1.0. The existing [LICENSE](LICENSE) governs the repository.
+Status: 0.5 interactive milestone implemented; the formal release benchmark and macOS validation remain before 1.0. The existing [LICENSE](LICENSE) governs the repository.

@@ -1,6 +1,6 @@
 # Roadmap to Version 1.0
 
-**Status:** proposed release plan, 2026-10-08. The 0.1 MVP, core 0.2 formats/filters, and 0.3 reporting features are implemented. The 0.4 follow implementation is Windows-tested and Linux integration-tested. The 0.5 TUI has a first bounded-cache implementation; Linux PTY validation and full historical navigation remain. macOS validation is deferred to the 1.0 MVP as requested. See [validation notes](VALIDATION.md). This roadmap stages the [1.0 technical contract](TECHNICAL_SPECIFICATION.md).
+**Status:** release plan, 2026-10-08. The 0.1 MVP, core 0.2 formats/filters, 0.3 reporting, 0.4 follow, and 0.5 interactive exploration milestones are implemented. Windows CLI tests and the expanded Linux PTY suite have passed. The formal 1 GiB release benchmark, broader platform checks, and macOS validation remain. See [validation notes](VALIDATION.md). This roadmap stages the [1.0 technical contract](TECHNICAL_SPECIFICATION.md).
 
 ## Product decision
 
@@ -68,17 +68,17 @@ The current implementation adds streamed text/CSV export with `--output`, `--col
 
 The implementation adds `--follow`, `--from-start`, and `--flush-partial` for batch output. Follow waits for complete appended lines, detects truncation and file replacement, then restarts from byte zero. Rapid rotations between polls can still lose records.
 
-**Gate:** Windows tests cover append, partial-line handling, truncation, default EOF start, and `--from-start`. POSIX tests also cover rename/replacement and Ctrl-C partial flush. Linux test run and error/reopen cases remain to be confirmed. No duplicate complete record should be emitted in normal append/truncate/replacement paths; new lines should appear within one second.
+**Gate:** Windows and Linux tests cover append, partial-line handling, truncation, default EOF start, and `--from-start`. POSIX tests also cover rename/replacement and Ctrl-C partial flush. Reopen/error handling and rapid-rotation races remain release-hardening cases. No duplicate complete record should be emitted in normal append/truncate/replacement paths; new lines should appear within one second.
 
 ## 0.5: terminal interface
 
-The first `--tui` implementation provides progress rendering, scrolling within a 256-row ring, regex search and row highlighting, dynamic filter/raw-regex edits with a rescan, help, and terminal restoration. Rows keep at most 1 KiB of display text. Remaining work adds checkpoint-backed navigation across the full file, search beyond cached previews, follow integration, and broader terminal behavior. Unsupported non-interactive streams fail clearly; log control bytes are sanitized.
+The `--tui` implementation provides a 256-row memory cache, temporary checkpoints, navigation and regex search across the full scan, error/warning jumps, context view, follow mode with append/partial-line/rotation handling, row highlighting, dynamic filter/raw-regex edits with a rescan, resize handling, help, and terminal restoration. Rows keep at most 1 KiB of display text; search is limited to each row's displayed preview. Broader terminal behavior remains. Unsupported non-interactive streams fail clearly; log control bytes are sanitized.
 
-**Gate:** Windows build and non-terminal rejection tests pass. A POSIX PTY scenario is in the suite but awaits a Linux run. Full-file navigation, search, resize, invalid filter edits, long lines, follow integration, and terminal restoration still need validation before 0.5 is complete.
+**Gate:** Windows build and non-terminal rejection tests pass. The expanded Linux PTY scenario passes and exercises historical search, severity jumps, context, resize, invalid filter edits, bounded previews for long lines, terminal restoration, TUI follow appends, partial records, and rotation. Manual usability checks on Windows Terminal and macOS remain part of release validation.
 
 ## 0.9: release candidate and 1.0 decision
 
-Freeze the 1.0 CLI and file-format behavior. Run the full test suite and sanitizer or equivalent checks available per platform; test high-cardinality fields, malformed input, long paths, Unicode, and output failures. Publish a benchmark report using the protocol in the technical specification: generated 1 GiB fixture, five warm-cache runs, median elapsed time, peak heap/RSS, compiler settings, CPU, storage, and output destination. Freeze the reference machine before running the acceptance benchmark.
+Freeze the 1.0 CLI and file-format behavior. Run the full test suite and sanitizer or equivalent checks available per platform; the suite now covers high-cardinality statistics, malformed input, long paths on POSIX, invalid UTF-8 CSV output, and output failures. Add sanitizer or equivalent runs and broader Unicode checks. Publish a benchmark report using the protocol in the technical specification: generated 1 GiB fixture, five warm-cache runs, median elapsed time, peak heap/RSS, compiler settings, CPU, storage, and output destination. Freeze the reference machine before running the acceptance benchmark.
 
 The 1.0 release requires:
 

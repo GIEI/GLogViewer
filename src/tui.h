@@ -7,9 +7,10 @@
 #include "reader.h"
 #include "regex.h"
 
-int tui_run(FILE *input, LineReader *reader, InputFormat format,
+int tui_run(FILE **input, LineReader *reader, InputFormat format,
             const char *custom_pattern, JsonScratch *scratch,
             Filter **field_filter, Regex **raw_regex, Regex *field_regex,
-            const char *regex_field_name);
+            const char *regex_field_name, int follow_enabled,
+            const char *follow_path);
 
 #endif

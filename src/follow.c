@@ -135,3 +135,52 @@ FollowResult follow_wait(FILE **input, const char *path, LineReader *reader,
         pause_poll();
     }
 }
+
+FollowResult follow_poll(FILE **input, const char *path, LineReader *reader,
+                         uint64_t observed_end, int pending_partial,
+                         uint64_t *line_number_base)
+{
+    FollowStat current;
+    FollowStat named;
+    if (logview_stop_requested) return FOLLOW_STOPPED;
+    if (!file_status(*input, &current)) return FOLLOW_ERROR;
+    if (!path_status(path, &named)) return FOLLOW_IDLE;
+#ifdef _WIN32
+    if (!path_matches_open_file(*input, path)) {
+#else
+    if (!same_identity(&current, &named)) {
+#endif
+        if (!pending_partial && current.st_size >= 0 &&
+            (uint64_t)current.st_size > reader->next_offset) {
+            if (!reader_reposition(reader, reader->next_offset,
+                                   *line_number_base)) return FOLLOW_ERROR;
+            return FOLLOW_READY;
+        }
+        {
+            FILE *replacement = fopen(path, "rb");
+            if (replacement == NULL) return FOLLOW_IDLE;
+            reader->file = replacement;
+            if (!reader_reposition(reader, 0, 0)) {
+                reader->file = *input;
+                fclose(replacement);
+                return FOLLOW_ERROR;
+            }
+            fclose(*input);
+            *input = replacement;
+            *line_number_base = 0;
+            return FOLLOW_RESTART;
+        }
+    }
+    if (named.st_size < 0) return FOLLOW_ERROR;
+    if ((uint64_t)named.st_size < observed_end) {
+        if (!reader_reposition(reader, 0, 0)) return FOLLOW_ERROR;
+        *line_number_base = 0;
+        return FOLLOW_RESTART;
+    }
+    if ((uint64_t)named.st_size > observed_end) {
+        if (!reader_reposition(reader, reader->next_offset,
+                               *line_number_base)) return FOLLOW_ERROR;
+        return FOLLOW_READY;
+    }
+    return FOLLOW_IDLE;
+}

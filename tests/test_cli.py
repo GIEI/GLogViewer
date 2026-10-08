@@ -3,7 +3,6 @@ import csv
 import io
 import os
 import signal
-import subprocess
 import sys
 import tempfile
 import time
@@ -26,6 +25,17 @@ def require(condition, message):
 
 def main():
     binary = Path(sys.argv[1]).resolve()
+    help_result = run(binary, "--help")
+    require(help_result.returncode == 0 and
+            all(option in help_result.stdout for option in (
+                b"--format", b"--pattern", b"--filter", b"--regex-field",
+                b"--export", b"--stats", b"--follow", b"--tui",
+                b"--max-line-bytes", b"--version")),
+            "help should list the documented CLI features")
+    version_result = run(binary, "--version")
+    require(version_result.returncode == 0 and
+            version_result.stdout.startswith(b"logview "),
+            "version should print the program name and version")
     scratch_root = Path(__file__).resolve().parents[1] / "build" / "test-tmp"
     scratch_root.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(
@@ -40,6 +50,21 @@ def main():
         require(result.returncode == 0, "raw regex should find matching records")
         require(result.stdout == b"first timeout\nlast timeout\n",
                 "CRLF and unterminated final lines should be handled")
+
+        if os.name != "nt":
+            long_path_directory = root
+            for index in range(5):
+                long_path_directory = long_path_directory / (
+                    "directory-{:02d}-{}".format(index, "x" * 55))
+                long_path_directory.mkdir()
+            long_path_file = long_path_directory / "long-path.log"
+            long_path_file.write_bytes(b"long path record\n")
+            require(len(os.fsencode(str(long_path_file))) > 260,
+                    "long path fixture should exceed the traditional 260-byte path limit")
+            long_path_result = run(binary, str(long_path_file))
+            require(long_path_result.returncode == 0 and
+                    long_path_result.stdout == b"long path record\n",
+                    "the CLI should open a long nested input path")
 
         follow_file = root / "follow.log"
         follow_file.write_bytes(b"existing record\n")
@@ -208,6 +233,20 @@ def main():
                 b"Selected records: 3\n" in statistics.stdout and
                 b"  ERROR: 3\n" in statistics.stdout,
                 "statistics should report exact record and selected-level counts")
+        cardinality_file = root / "high-cardinality.jsonl"
+        with cardinality_file.open("wb") as stream:
+            for _ in range(900):
+                stream.write(b'{"service":"api"}\n')
+            for number in range(1000):
+                stream.write(( '{{"service":"user-{}"}}\n'.format(number)
+                              ).encode("ascii"))
+        cardinality_stats = run(binary, str(cardinality_file),
+                                "--format", "jsonl", "--stats")
+        require(cardinality_stats.returncode == 0 and
+                b"Physical records: 1900\n" in cardinality_stats.stdout and
+                b"Selected records: 1900\n" in cardinality_stats.stdout and
+                b"service=api: 900 (estimated; error <= 0)" in cardinality_stats.stdout,
+                "statistics should retain exact counts and bounded heavy hitters at high cardinality")
         timeline_file = root / "timeline.jsonl"
         timeline_file.write_bytes(
             b'{"timestamp":"2025-01-01T00:00:00Z","level":"INFO","service":"api"}\n'
@@ -242,6 +281,10 @@ def main():
         tui_conflict = run(binary, str(json_file), "--tui", "--stats")
         require(tui_conflict.returncode == 3,
                 "TUI and statistics output modes should be mutually exclusive")
+        tui_follow_partial = run(binary, str(json_file), "--tui", "--follow",
+                                 "--flush-partial")
+        require(tui_follow_partial.returncode == 3,
+                "TUI follow should reject the batch-only partial flush option")
 
         if os.name != "nt":
             import fcntl
@@ -251,13 +294,20 @@ def main():
             import termios
 
             tui_file = root / "tui.jsonl"
-            tui_file.write_bytes(
-                b'{"level":"INFO","message":"startup"}\n'
-                b'{"level":"ERROR","message":"connection timeout"}\n'
+            tui_records = [
+                b'{"level":"INFO","message":"startup"}\n',
+                b'{"level":"ERROR","message":"connection timeout"}\n',
+                b'{"level":"WARN","message":"disk usage high"}\n',
+            ]
+            tui_records.extend(
+                ('{"level":"INFO","message":"filler %d"}\n' % number).encode("ascii")
+                for number in range(600)
             )
+            tui_file.write_bytes(b"".join(tui_records))
             master_fd, slave_fd = pty.openpty()
             fcntl.ioctl(slave_fd, termios.TIOCSWINSZ,
                         struct.pack("HHHH", 24, 100, 0, 0))
+            original_terminal = termios.tcgetattr(slave_fd)
             tui_process = subprocess.Popen(
                 [str(binary), str(tui_file), "--format", "jsonl", "--tui"],
                 stdin=slave_fd,
@@ -265,7 +315,6 @@ def main():
                 stderr=slave_fd,
                 close_fds=True,
             )
-            os.close(slave_fd)
             tui_output = bytearray()
             try:
                 def read_until(needle, timeout):
@@ -279,10 +328,25 @@ def main():
                                 break
 
                 read_until(b"GLogViewer", 2)
+                read_until(b"Scan complete", 2)
                 os.write(master_fd, b"/")
                 read_until(b"\033[24;1H\033[2K/", 2)
                 os.write(master_fd, b"timeout\n")
                 read_until(b"Search: timeout", 2)
+                os.write(master_fd, b"n")
+                read_until(b'2 {"level":"ERROR","message":"connection timeout"}', 2)
+                os.write(master_fd, b"w")
+                read_until(b'3 {"level":"WARN","message":"disk usage high"}', 2)
+                os.write(master_fd, b"c")
+                read_until(b"Context around source line 3", 2)
+                read_until(b'2 {"level":"ERROR","message":"connection timeout"}', 2)
+                fcntl.ioctl(master_fd, termios.TIOCSWINSZ,
+                            struct.pack("HHHH", 12, 60, 0, 0))
+                read_until(b"\033[11;1H\033[2K", 2)
+                os.write(master_fd, b"f")
+                read_until(b"Filter: ", 2)
+                os.write(master_fd, b"(level=ERROR\n")
+                read_until(b"Invalid filter:", 2)
                 os.write(master_fd, b"q")
                 try:
                     tui_process.wait(timeout=5)
@@ -318,13 +382,109 @@ def main():
                     tui_output.extend(chunk)
                 require(tui_process.returncode == 0 and
                         b"connection timeout" in tui_output and
-                        b"Search: timeout" in tui_output,
-                        "TUI should render records and apply an interactive regex search")
+                        b'2 {"level":"ERROR","message":"connection timeout"}' in tui_output and
+                        b'3 {"level":"WARN","message":"disk usage high"}' in tui_output and
+                        b"Context around source line 3" in tui_output and
+                        b"\033[11;1H\033[2K" in tui_output and
+                        b"Search: timeout" in tui_output and
+                        b"Invalid filter:" in tui_output and
+                        termios.tcgetattr(slave_fd) == original_terminal,
+                        "TUI should handle invalid filters, restore the terminal, and retain navigation features")
             finally:
                 if tui_process.poll() is None:
                     tui_process.kill()
                     tui_process.wait(timeout=5)
                 os.close(master_fd)
+                os.close(slave_fd)
+
+            long_tui_file = root / "tui-long-line.jsonl"
+            long_tui_file.write_bytes(b'{"level":"INFO","message":"' +
+                                      b'x' * 1800 + b'"}\n')
+            long_master, long_slave = pty.openpty()
+            fcntl.ioctl(long_slave, termios.TIOCSWINSZ,
+                        struct.pack("HHHH", 24, 100, 0, 0))
+            long_process = subprocess.Popen(
+                [str(binary), str(long_tui_file), "--format", "jsonl", "--tui"],
+                stdin=long_slave,
+                stdout=long_slave,
+                stderr=long_slave,
+                close_fds=True,
+            )
+            os.close(long_slave)
+            long_output = bytearray()
+            try:
+                deadline = time.monotonic() + 3
+                while (b"[preview clipped]" not in long_output and
+                       long_process.poll() is None and time.monotonic() < deadline):
+                    ready, _, _ = select.select([long_master], [], [], 0.1)
+                    if ready:
+                        try:
+                            long_output.extend(os.read(long_master, 65536))
+                        except OSError:
+                            break
+                os.write(long_master, b"q")
+                long_process.wait(timeout=5)
+                require(long_process.returncode == 0 and
+                        b"[preview clipped]" in long_output,
+                        "TUI should display bounded previews for long records")
+            finally:
+                if long_process.poll() is None:
+                    long_process.kill()
+                    long_process.wait(timeout=5)
+                os.close(long_master)
+
+            follow_tui_file = root / "tui-follow.jsonl"
+            follow_tui_file.write_bytes(b'{"level":"INFO","message":"initial"}\n')
+            follow_master, follow_slave = pty.openpty()
+            fcntl.ioctl(follow_slave, termios.TIOCSWINSZ,
+                        struct.pack("HHHH", 24, 100, 0, 0))
+            follow_process = subprocess.Popen(
+                [str(binary), str(follow_tui_file), "--format", "jsonl",
+                 "--follow", "--tui"],
+                stdin=follow_slave,
+                stdout=follow_slave,
+                stderr=follow_slave,
+                close_fds=True,
+            )
+            os.close(follow_slave)
+            follow_output = bytearray()
+            try:
+                def read_follow_until(needle, timeout):
+                    deadline = time.monotonic() + timeout
+                    while needle not in follow_output and follow_process.poll() is None and time.monotonic() < deadline:
+                        ready, _, _ = select.select([follow_master], [], [], 0.1)
+                        if ready:
+                            try:
+                                follow_output.extend(os.read(follow_master, 65536))
+                            except OSError:
+                                break
+
+                read_follow_until(b"Following file; press q to stop", 3)
+                with follow_tui_file.open("ab") as stream:
+                    stream.write(b'{"level":"INFO","message":"live')
+                    stream.flush()
+                time.sleep(0.4)
+                require(b'"message":"live' not in follow_output,
+                        "TUI follow should wait for a complete appended record")
+                with follow_tui_file.open("ab") as stream:
+                    stream.write(b' event"}\n')
+                    stream.flush()
+                read_follow_until(b'2 {"level":"INFO","message":"live event"}', 3)
+                rotated_file = root / "tui-follow.jsonl.1"
+                follow_tui_file.replace(rotated_file)
+                follow_tui_file.write_bytes(b'{"level":"ERROR","message":"after rotation"}\n')
+                read_follow_until(b'1 {"level":"ERROR","message":"after rotation"}', 3)
+                os.write(follow_master, b"q")
+                follow_process.wait(timeout=5)
+                require(follow_process.returncode == 0 and
+                        b'2 {"level":"INFO","message":"live event"}' in follow_output and
+                        b'1 {"level":"ERROR","message":"after rotation"}' in follow_output,
+                        "TUI follow should flush complete appends and rescan rotated files")
+            finally:
+                if follow_process.poll() is None:
+                    follow_process.kill()
+                    follow_process.wait(timeout=5)
+                os.close(follow_master)
 
         text_export = root / "selected.log"
         exported = run(binary, str(json_file), "--format", "jsonl", "--filter",
@@ -363,6 +523,11 @@ def main():
                         str(raw_file), "--force")
         require(same_file.returncode == 2 and raw_file.read_bytes().startswith(b"first timeout"),
                 "export must refuse to overwrite the input file even with --force")
+        missing_directory = root / "missing-output-directory" / "result.csv"
+        failed_export = run(binary, str(raw_file), "--export", "csv", "--output",
+                            str(missing_directory))
+        require(failed_export.returncode == 2,
+                "an output path whose parent does not exist should report an I/O error")
 
         invalid_utf8 = root / "invalid-utf8.log"
         invalid_utf8.write_bytes(b'bad\xff,"quoted"\n')

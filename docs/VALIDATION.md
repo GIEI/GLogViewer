@@ -11,7 +11,7 @@ The following commands completed successfully in the repository workspace:
 python tests\test_cli.py build\logview.exe
 ```
 
-The CLI suite covers raw and JSON Lines input, regex constructs and work limits, compound filter precedence, syslog RFC 3164/5424, Apache Common/Combined, custom patterns, format detection, text/CSV export, exact record/level statistics, ISO and Apache timeline parsing, frequent-value estimates, follow append/partial/truncate/from-start behavior, TUI non-terminal rejection, long lines, and optional local sample files. POSIX runs additionally test rotation, Ctrl-C partial flushing, and a PTY search/quit interaction.
+The CLI suite covers help/version output, raw and JSON Lines input, regex constructs and work limits, compound filter precedence, syslog RFC 3164/5424, Apache Common/Combined, custom patterns, format detection, text/CSV export, exact record/level statistics, high-cardinality frequent-value estimates, ISO and Apache timeline parsing, follow append/partial/truncate/from-start behavior, output failures, TUI non-terminal rejection, long lines, and optional local sample files. POSIX runs additionally test long input paths, rotation, Ctrl-C partial flushing, and PTY search/navigation, invalid filter edits, bounded long-line previews, terminal restoration, resize, and live follow.
 
 ## Linux_1GB.syslog sample
 
@@ -31,4 +31,4 @@ Running `--stats` on this sample reported 2,220,000 physical records, 2,219,778 
 
 ## Platform coverage
 
-The earlier CLI suite and large-sample scans also passed on the user's Linux machine with GCC and no compiler warnings. The follow implementation has been built and tested on Windows; the expanded POSIX follow tests (rotation and Ctrl-C partial flushing) need a fresh Linux run. macOS validation is deferred to the 1.0 MVP. The sample's `Linux_` filename describes its log content, not the operating system used to run the Windows checks.
+The CLI suite and large-sample scans have passed on the user's Linux machine with GCC and no compiler warnings. The expanded POSIX suite also passed, covering follow rotation/Ctrl-C behavior and the TUI PTY scenarios. The Windows build and CLI suite pass with MSVC. macOS validation is deferred to the 1.0 MVP. The sample's `Linux_` filename describes its log content, not the operating system used to run the Windows checks.

@@ -78,7 +78,7 @@ static void print_usage(FILE *stream)
           "  --follow                 Follow appended records until interrupted.\n"
           "  --from-start             Read existing records before following.\n"
           "  --flush-partial          Emit a final incomplete record on Ctrl-C.\n"
-          "  --tui                    Browse records in an interactive terminal.\n"
+          "  --tui                    Browse records in an interactive terminal; combine with --follow to monitor.\n"
           "  --max-line-bytes count   Lower the 16 MiB maximum line size.\n"
           "  --help                   Show this help.\n"
           "  --version                Show the version.\n",
@@ -232,7 +232,8 @@ static int parse_options(int argc, char **argv, Options *options)
         options->column_list != NULL || options->force_output)) return -1;
     if ((options->from_start || options->flush_partial) && !options->follow_mode) return -1;
     if (options->follow_mode && (options->stats_mode || options->export_set)) return -1;
-    if (options->tui_mode && (options->follow_mode || options->stats_mode || options->export_set)) return -1;
+    if (options->tui_mode && (options->stats_mode || options->export_set ||
+                              options->flush_partial)) return -1;
     return 0;
 }
 
@@ -514,10 +515,11 @@ int main(int argc, char **argv)
         }
     }
     if (options.tui_mode) {
-        result_code = tui_run(input, &reader, options.format,
+        result_code = tui_run(&input, &reader, options.format,
                               options.custom_pattern, &scratch,
                               &field_filter, &raw_regex, field_regex,
-                              regex_field_name);
+                              regex_field_name, options.follow_mode,
+                              options.input_path);
         goto cleanup;
     }
     if (options.follow_mode && !options.from_start && !follow_seek_end(&reader)) {

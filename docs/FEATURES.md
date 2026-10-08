@@ -1,6 +1,6 @@
 # Feature Catalogue and Product Positioning
 
-**Status:** this catalogue describes the 1.0 target. The 0.1 MVP, core 0.2 formats/filters, and 0.3 export/statistics are implemented. The 0.4 follow feature is implemented and awaits Linux integration confirmation. macOS testing is scheduled with the 1.0 MVP. The [roadmap](ROADMAP.md) tracks remaining work. Exact 1.0 behavior is specified in [Technical Specification](TECHNICAL_SPECIFICATION.md).
+**Status:** this catalogue describes the 1.0 target. The 0.1 MVP, core 0.2 formats/filters, 0.3 export/statistics, 0.4 follow, and 0.5 interactive exploration milestones are implemented. Windows CLI tests and the Linux integration/PTy suite have passed. macOS testing is scheduled with the 1.0 MVP. The [roadmap](ROADMAP.md) tracks remaining work. Exact 1.0 behavior is specified in [Technical Specification](TECHNICAL_SPECIFICATION.md).
 
 ## 1. Users and jobs
 
@@ -26,7 +26,7 @@ Common application fields worth preserving are timestamp, severity, message, ser
 | Field filters with AND/OR | Must | Reduce noise using structured data | Explicit precedence and missing-field rules. |
 | Internal regex on raw line or field | Must | Find text and highlight evidence | Supported subset; iterative NFA execution. |
 | CLI batch mode | Must | Use in scripts and incident runbooks | Stable exit codes and diagnostics. |
-| TUI browse/search/help | Must | Explore filtered records interactively | Bounded viewport cache; rescan for distant jumps. |
+| TUI browse/search/help | Must | Explore filtered records interactively | Bounded viewport cache, full-scan checkpoints, regex search, severity jumps, and context view. |
 | Follow mode | Must | Watch a live application file | Append/truncate/rotation behavior documented. |
 | Text and CSV export | Must | Share a filtered evidence set | Streamed output with fixed CSV columns. |
 | Counts, timeline, frequent values | Must | Spot error spikes and dominant fields | Exact counters; bounded estimated heavy hitters. |

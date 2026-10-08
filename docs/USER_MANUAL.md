@@ -1,6 +1,6 @@
 # User Manual
 
-**Status:** the batch CLI includes the 0.1 MVP, core 0.2 formats/filters, 0.3 reporting, and 0.4 follow features. The initial TUI is implemented; full-file navigation and follow integration remain in progress. macOS validation is deferred to the 1.0 MVP. The [roadmap](ROADMAP.md) gives implementation status and release gates.
+**Status:** the batch CLI includes the 0.1 MVP, core 0.2 formats/filters, 0.3 reporting, and 0.4 follow features. The 0.5 TUI supports full-scan navigation using temporary checkpoints, filter editing, context view, and live follow; Windows CLI tests and the Linux PTY suite have passed. macOS validation and the formal release benchmark remain for the 1.0 MVP. The [roadmap](ROADMAP.md) gives implementation status and release gates.
 
 ## 1. What the tool will do
 
@@ -23,7 +23,7 @@ logview <file> [--format FORMAT] [--pattern PATTERN] [--filter EXPRESSION]
 
 `--format raw` is the default. Formats include `raw`, `jsonl`, `syslog3164`, `syslog5424`, `apache-common`, `apache-combined`, `nginx-combined`, `custom`, and `auto`. `--filter` accepts equality, inequality, and field regex predicates combined with `and`, `or`, and parentheses. `--regex` searches the entire raw line; `--regex-field` searches a parsed field. These options are combined with `--filter` using AND. `--stats` prints exact record and level counts, a 256-bin timestamp timeline, and estimated frequent field/value pairs. Timestamp aggregation recognizes ISO/RFC 3339 values with `Z` or a numeric offset and Apache Combined timestamps. Timestamps without an explicit timezone or otherwise invalid are counted as unknown. The timeline makes a second streaming pass over the input. `--follow` waits for appended complete lines, detects file truncation and rotation, and handles Ctrl-C. `--export` streams selected records to a text or CSV file. Use `--help` or `--version` to inspect the built program.
 
-The 1.0 command form below includes options that are still under development.
+The command form below documents the current CLI options. Platform validation and release packaging remain in progress.
 
 ## 2. Command form
 
@@ -50,6 +50,7 @@ logview syslog.log --format syslog5424 --stats
 logview app.log --follow --format jsonl --filter "level=ERROR"
 logview app.log --follow --from-start --flush-partial
 logview app.log --format jsonl --tui
+logview app.log --format jsonl --follow --tui
 ```
 
 Quote expressions for the shell. On Windows PowerShell and Unix shells, double quotes around a simple expression work as shown. Escaping embedded quotes differs by shell; place complex expressions in single quotes where supported and verify how your shell passes them.
@@ -129,17 +130,20 @@ logview app.log --format jsonl --tui
 
 | Key | Proposed action |
 | --- | --- |
-| Up/Down | Move one row in the retained window. |
-| Page Up/Page Down | Move one screen in the retained window. |
-| Home/End | Go to the oldest/newest retained row. |
-| `/` | Enter a regex search over retained row previews. |
-| `n` / `N` | Go to next/previous search match in the retained window. |
+| Up/Down | Move one row. |
+| Page Up/Page Down | Move one screen. |
+| Home/End | Go to the first/last selected row in the scanned file. |
+| `/` | Enter a regex search over the scanned file. |
+| `n` / `N` | Go to the next/previous search match across the scanned file. |
+| `e` / `E` | Go to the next/previous error-level record. |
+| `w` / `W` | Go to the next/previous warning-level record. |
+| `c` | Show or hide four physical records before and after the selected record. |
 | `f` | Edit the field filter and rescan from the beginning. |
 | `r` | Edit the raw-line regex and rescan from the beginning. |
 | `?` | Show help. |
-| `q` | Quit. |
+| `q` | Quit; in follow mode, stop waiting for new records. |
 
-The status line shows scan state and search text. The TUI currently retains only the newest 256 selected rows, with at most 1 KiB of display text per row; long rows are clipped. Search and next/previous match operate on those retained previews. Search matches are highlighted by row. Changing a filter or raw regex rescans the file. Log control characters are displayed safely, without executing terminal escape sequences. Full-file checkpoint navigation and TUI follow integration are planned before 1.0.
+Use `--follow --tui` to scan the file, then wait for appended complete records. A final incomplete line stays pending until its newline arrives. File rotation or truncation clears the current view and rescans the replacement file. `--flush-partial` is not supported in TUI follow mode. Error and warning jumps use the parsed `level` field when available; HTTP 5xx responses are treated as errors and 4xx responses as warnings. The status line shows scan state and search text. During the initial scan, a spinner and physical/selected record counters update every 65,536 physical records; the result rows appear when scanning completes. The TUI redraws its viewport after a terminal resize. It keeps a 256-row memory cache and stores navigation checkpoints in temporary files so it can reload rows and context from anywhere in the scanned file. The temporary directory must have enough free space for the indexes. Display text is limited to 1 KiB per row; longer rows are clipped, and searches inspect the displayed preview. Search matches are highlighted by row. Changing a filter or raw regex rescans the file. Log control characters are displayed safely, without executing terminal escape sequences.
 
 ## 9. Exit codes and troubleshooting
 
