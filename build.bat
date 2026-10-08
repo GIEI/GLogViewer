@@ -21,7 +21,7 @@ if errorlevel 1 (
 )
 
 if not exist build mkdir build
-cl.exe /nologo /std:c11 /W4 /O2 /D_CRT_SECURE_NO_WARNINGS /Iinclude /Isrc src\main.c src\reader.c src\jsonl.c src\parsers.c src\filter.c src\regex.c /Fe:build\logview.exe
+cl.exe /nologo /std:c11 /W4 /O2 /D_CRT_SECURE_NO_WARNINGS /Iinclude /Isrc src\main.c src\reader.c src\follow.c src\terminal.c src\tui.c src\jsonl.c src\parsers.c src\filter.c src\output.c src\stats.c src\regex.c /Fe:build\logview.exe
 set "BUILD_RESULT=%ERRORLEVEL%"
 popd
 exit /b %BUILD_RESULT%

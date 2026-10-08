@@ -1,6 +1,6 @@
 # GLogViewer
 
-GLogViewer is a cross-platform, dependency-free C99 tool for exploring large structured log files from a command line or terminal interface. The proposed executable is `logview`. The batch CLI now supports raw and JSON Lines input, syslog RFC 3164/5424, Apache/Nginx access logs, custom placeholder patterns, bounded format detection, compound field filters, and an internal regex engine. The 0.2 structured-log milestone is in progress. Windows build and CLI checks pass; macOS and Linux validation remains outstanding. See the [roadmap](docs/ROADMAP.md) for the remaining work to 1.0.
+GLogViewer is a cross-platform, dependency-free C99 tool for exploring large structured log files from a command line or terminal interface. The proposed executable is `logview`. The batch CLI supports raw and JSON Lines input, syslog RFC 3164/5424, Apache/Nginx access logs, custom patterns, format detection, compound filters, regex, text/CSV export, exact record/level counts, a timestamp timeline, estimated frequent field values, and follow mode with truncation and rotation detection. An initial TUI supports a bounded viewport, regex search, filter edits, and help; full-file navigation is still in development. macOS validation is deferred to the 1.0 MVP. See the [roadmap](docs/ROADMAP.md) for remaining work to 1.0.
 
 ## Version 1.0 target
 
@@ -26,7 +26,7 @@ make
 make test
 ```
 
-The Linux/macOS Makefile target is provided but has not yet been validated in this environment. Tests use temporary fixtures under `build/test-tmp` and automatically scan `SAMPLES/enwik8` when that ignored local sample is present.
+The Linux Makefile and test suite have passed on the user's Linux machine. macOS validation is deferred to the 1.0 MVP. Tests use temporary fixtures under `build/test-tmp` and scan local samples when present.
 
 ## CLI examples
 
@@ -37,13 +37,14 @@ build\logview.exe app.jsonl --format jsonl --filter "level=ERROR" --regex-field 
 
 Available formats are `raw` (the default), `jsonl`, `syslog3164`, `syslog5424`, `apache-common`, `apache-combined`, `nginx-combined`, `custom`, and `auto`. Filters support `=`, `!=`, `~`, `and`, `or`, and parentheses. Use `--help` for the exact options.
 
-## Planned 1.0 commands
+## More examples
 
-Statistics, export, follow, and the TUI are planned features from later roadmap stages.
+Text/CSV export, statistics, and follow are available. The TUI is in progress and currently retains a bounded window of recent selected records. Timestamp timeline output uses a second streaming pass; frequent field/value counts are bounded estimates.
 
 ```text
 logview app.log --format custom --pattern "%{TIMESTAMP:ts} %{LEVEL:lvl} %{MESSAGE:msg}" --filter "level=ERROR" --regex "timeout"
 logview access.log --format apache-combined --filter "status=500 or status=502" --export csv --output errors.csv
+logview app.jsonl --format jsonl --stats
 logview --follow app.log --format jsonl --filter "level=ERROR"
 logview --stats app.log --format jsonl
 logview --tui app.log
@@ -56,6 +57,7 @@ logview --tui app.log
 - [Technical specification](docs/TECHNICAL_SPECIFICATION.md): syntax, data contracts, limits, performance targets, and acceptance tests.
 - [Software architecture](docs/SOFTWARE_ARCHITECTURE.md): modules, data flow, platform boundaries, and implementation sequence.
 - [User manual](docs/USER_MANUAL.md): proposed commands, format selection, filters, navigation, exports, and troubleshooting.
+- [Validation notes](docs/VALIDATION.md): local platform checks and the large syslog/HTTP sample results.
 
 The documents distinguish implemented behavior from the 1.0 design target. The source list in the technical specification records the standards, product documentation, and research used to shape the design.
 
@@ -65,4 +67,4 @@ All repository content and every source comment must be written in English. See 
 
 ## Status and license
 
-Status: 0.2 structured-log milestone in progress toward the 1.0 target. The existing [LICENSE](LICENSE) governs the repository.
+Status: 0.3 reporting milestone implemented; cross-platform and release validation remain before 1.0. The existing [LICENSE](LICENSE) governs the repository.

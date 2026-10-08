@@ -1,10 +1,10 @@
 # User Manual
 
-**Status:** the batch CLI includes the 0.1 MVP and current 0.2 structured-format work. Statistics, export, follow, and TUI sections describe features planned for later milestones. The [roadmap](ROADMAP.md) gives implementation status and release gates.
+**Status:** the batch CLI includes the 0.1 MVP, core 0.2 formats/filters, 0.3 reporting, and 0.4 follow features. The initial TUI is implemented; full-file navigation and follow integration remain in progress. macOS validation is deferred to the 1.0 MVP. The [roadmap](ROADMAP.md) gives implementation status and release gates.
 
 ## 1. What the tool will do
 
-`logview` reads a local line-oriented log file and prints selected records. The current batch CLI supports raw, JSON Lines, syslog RFC 3164/5424, Apache/Nginx access logs, custom patterns, and format detection. The input is read-only. Later milestones add interactive browsing, follow, statistics, and export. Binary systemd journals and native Windows Event Log files must first be exported to a supported line-oriented form.
+`logview` reads a local line-oriented log file and prints selected records. The current CLI supports raw, JSON Lines, syslog RFC 3164/5424, Apache/Nginx access logs, custom patterns, format detection, text/CSV export, statistics, follow mode, and an initial terminal browser. The input is read-only. Binary systemd journals and native Windows Event Log files must first be exported to a supported line-oriented form.
 
 ## Build and options
 
@@ -15,12 +15,15 @@ The current CLI supports one file and these options:
 ```text
 logview <file> [--format FORMAT] [--pattern PATTERN] [--filter EXPRESSION]
                 [--regex pattern] [--regex-field field=pattern]
+                [--stats | --export text|csv --output path]
+                [--columns list] [--force]
+                [--follow [--from-start] [--flush-partial]]
                 [--max-line-bytes count]
 ```
 
-`--format raw` is the default. Formats include `raw`, `jsonl`, `syslog3164`, `syslog5424`, `apache-common`, `apache-combined`, `nginx-combined`, `custom`, and `auto`. `--filter` accepts equality, inequality, and field regex predicates combined with `and`, `or`, and parentheses. `--regex` searches the entire raw line; `--regex-field` searches a parsed field. These options are combined with `--filter` using AND. Use `--help` or `--version` to inspect the built program.
+`--format raw` is the default. Formats include `raw`, `jsonl`, `syslog3164`, `syslog5424`, `apache-common`, `apache-combined`, `nginx-combined`, `custom`, and `auto`. `--filter` accepts equality, inequality, and field regex predicates combined with `and`, `or`, and parentheses. `--regex` searches the entire raw line; `--regex-field` searches a parsed field. These options are combined with `--filter` using AND. `--stats` prints exact record and level counts, a 256-bin timestamp timeline, and estimated frequent field/value pairs. Timestamp aggregation recognizes ISO/RFC 3339 values with `Z` or a numeric offset and Apache Combined timestamps. Timestamps without an explicit timezone or otherwise invalid are counted as unknown. The timeline makes a second streaming pass over the input. `--follow` waits for appended complete lines, detects file truncation and rotation, and handles Ctrl-C. `--export` streams selected records to a text or CSV file. Use `--help` or `--version` to inspect the built program.
 
-The 1.0 command form and feature descriptions below include options that are not implemented yet.
+The 1.0 command form below includes options that are still under development.
 
 ## 2. Command form
 
@@ -44,6 +47,8 @@ logview app.log --format jsonl --filter "level=ERROR"
 logview app.log --format jsonl --filter "level=ERROR" --regex "timeout"
 logview access.log --format apache-combined --filter "status=500 or status=502"
 logview syslog.log --format syslog5424 --stats
+logview app.log --follow --format jsonl --filter "level=ERROR"
+logview app.log --follow --from-start --flush-partial
 logview app.log --format jsonl --tui
 ```
 
@@ -96,7 +101,7 @@ logview --follow app.log --format jsonl --filter "level=ERROR"
 logview --follow --from-start app.log --format custom --pattern "%{TIMESTAMP} %{LEVEL} %{MESSAGE}"
 ```
 
-Follow begins at the end by default; `--from-start` reads the existing content first. New records appear after their newline arrives. A truncated file restarts at byte zero. If the path is replaced by rotation, the tool drains complete lines from the old handle and starts the new file at byte zero after detecting the replacement. A rapid rotation sequence can lose lines; this mode is intended for interactive monitoring, not guaranteed collection. Press Ctrl-C to stop. `--flush-partial` emits a final incomplete line on normal interruption.
+Follow begins at the end by default; `--from-start` reads the existing content first. New records appear after their newline arrives. A truncated file restarts at byte zero. If the path is replaced by rotation, the tool drains complete records available on the old handle, then starts the new file at byte zero after detecting the replacement. A rapid rotation sequence can lose lines; this mode is intended for interactive monitoring, not guaranteed collection. Press Ctrl-C to stop. `--flush-partial` emits a final incomplete line on interruption. Follow exits with status 0 on Ctrl-C and cannot be combined with `--stats` or `--export`.
 
 ## 6. Export results
 
@@ -106,7 +111,7 @@ logview access.log --format apache-combined --filter "status=500" --export csv -
 logview app.log --format jsonl --export csv --columns "line_number,timestamp,level,request_id,message" --output report.csv
 ```
 
-Text export writes the original selected lines. CSV defaults to `line_number,timestamp,level,message,raw`; `--columns` sets a fixed list. Missing fields become empty cells. CSV quotes commas, quotes, and line breaks. Existing output files are protected unless `--force` is supplied. Exports are streamed and may be partially written if an I/O error occurs; the command then returns 2. An empty selection returns 1.
+Text export writes each selected record's original content followed by LF. CSV defaults to `line_number,timestamp,level,message,raw`; `--columns` sets a fixed list. Missing fields become empty cells. CSV quotes commas, quotes, and line breaks and replaces invalid UTF-8 with U+FFFD. Existing output files are protected unless `--force` is supplied. The output path cannot refer to the input file. Exports are streamed and may be partially written if an I/O error occurs; the command then returns 2. An empty selection returns 1.
 
 ## 7. View statistics
 
@@ -114,7 +119,7 @@ Text export writes the original selected lines. CSV defaults to `line_number,tim
 logview app.log --format jsonl --stats
 ```
 
-Statistics include physical, parsed, rejected, and selected record counts; counts by level; a 256-bin timestamp timeline; and frequent field/value candidates. Record and level counts are exact. Frequent-value counts are bounded estimates and are labelled `estimated`. Timestamps that cannot be placed unambiguously on a timeline appear as `UNKNOWN_TIME`. Statistics are a snapshot and cannot be combined with follow mode in v1.
+The `--stats` output includes exact physical, parsed, rejected, and selected record counts and exact level counts for selected records. Missing levels are counted as `UNSPECIFIED`. A fixed 256-bin timeline spans the observed unambiguous timestamp range. Timestamp values without an explicit timezone or in unsupported formats are reported under `Unknown timestamps`. The `Frequent field values (estimated)` section reports up to ten leading candidates maintained in fixed memory; the count is approximate and includes an error bound. Statistics cannot be combined with export.
 
 ## 8. Terminal interface
 
@@ -124,18 +129,17 @@ logview app.log --format jsonl --tui
 
 | Key | Proposed action |
 | --- | --- |
-| Up/Down | Move one visible row. |
-| Page Up/Page Down | Move one viewport. |
-| Home/End | Go to beginning/end of the selected view. |
-| `/` | Edit an incremental regex search. |
-| `n` / `N` | Go to next/previous search match. |
-| `f` | Edit the field filter. |
-| `r` | Edit the raw-line regex. |
-| `s` | Show summary statistics. |
+| Up/Down | Move one row in the retained window. |
+| Page Up/Page Down | Move one screen in the retained window. |
+| Home/End | Go to the oldest/newest retained row. |
+| `/` | Enter a regex search over retained row previews. |
+| `n` / `N` | Go to next/previous search match in the retained window. |
+| `f` | Edit the field filter and rescan from the beginning. |
+| `r` | Edit the raw-line regex and rescan from the beginning. |
 | `?` | Show help. |
 | `q` | Quit. |
 
-The status line shows format, progress, active filters, and rejected records. Search matches are highlighted. Changing a filter rescans the file; the visible result count is incomplete until scanning finishes. Long jumps may take time because the TUI keeps a bounded cache and seeks from checkpoints rather than storing every result. Log control characters are displayed safely, without executing terminal escape sequences.
+The status line shows scan state and search text. The TUI currently retains only the newest 256 selected rows, with at most 1 KiB of display text per row; long rows are clipped. Search and next/previous match operate on those retained previews. Search matches are highlighted by row. Changing a filter or raw regex rescans the file. Log control characters are displayed safely, without executing terminal escape sequences. Full-file checkpoint navigation and TUI follow integration are planned before 1.0.
 
 ## 9. Exit codes and troubleshooting
 

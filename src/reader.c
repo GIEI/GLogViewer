@@ -1,7 +1,17 @@
+#ifndef _WIN32
+#define _POSIX_C_SOURCE 200809L
+#endif
+
 #include "reader.h"
 
 #include <stdlib.h>
 #include <string.h>
+
+#ifdef _WIN32
+#include <io.h>
+#else
+#include <sys/types.h>
+#endif
 
 static int reader_byte(LineReader *reader)
 {
@@ -70,6 +80,26 @@ void reader_destroy(LineReader *reader)
     memset(reader, 0, sizeof(*reader));
 }
 
+int reader_reposition(LineReader *reader, uint64_t offset,
+                      uint64_t last_line_number)
+{
+#ifdef _WIN32
+    if (_fseeki64(reader->file, (__int64)offset, SEEK_SET) != 0) return 0;
+#else
+    if (fseeko(reader->file, (off_t)offset, SEEK_SET) != 0) return 0;
+#endif
+    clearerr(reader->file);
+    reader->input_length = 0;
+    reader->input_position = 0;
+    reader->next_offset = offset;
+    reader->next_line_number = last_line_number;
+    reader->input_eof = 0;
+    reader->input_error = 0;
+    reader->line_length = 0;
+    reader->line_terminated = 0;
+    return 1;
+}
+
 ReaderResult reader_next(LineReader *reader, const unsigned char **line,
                          size_t *line_length, uint64_t *line_number,
                          uint64_t *byte_offset)
@@ -115,6 +145,12 @@ ReaderResult reader_next(LineReader *reader, const unsigned char **line,
 
     reader->next_line_number++;
     if (too_long) {
+        reader->line_length = 0;
+        reader->line_terminated = ended_with_lf;
+        *line = reader->line;
+        *line_length = 0;
+        *line_number = reader->next_line_number;
+        *byte_offset = start_offset;
         return READER_TOO_LONG;
     }
     if (ended_with_lf && length > 0 && reader->line[length - 1] == '\r') {
@@ -122,6 +158,7 @@ ReaderResult reader_next(LineReader *reader, const unsigned char **line,
     }
 
     reader->line_length = length;
+    reader->line_terminated = ended_with_lf;
     *line = reader->line;
     *line_length = length;
     *line_number = reader->next_line_number;

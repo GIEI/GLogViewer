@@ -172,12 +172,6 @@ static int is_word(unsigned char value)
            is_digit(value) || value == '_';
 }
 
-static int is_space(unsigned char value)
-{
-    return value == ' ' || value == '\t' || value == '\n' ||
-           value == '\r' || value == '\f' || value == '\v';
-}
-
 static void class_add_escape(ByteClass *byte_class, unsigned char code)
 {
     unsigned int value;

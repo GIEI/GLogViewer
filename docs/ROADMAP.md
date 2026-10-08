@@ -1,6 +1,6 @@
 # Roadmap to Version 1.0
 
-**Status:** proposed release plan, 2026-10-08. The 0.1 MVP is implemented. The 0.2 structured-log implementation is in progress; the current Windows build and CLI checks pass. macOS and Linux validation remains outstanding. This roadmap stages the [1.0 technical contract](TECHNICAL_SPECIFICATION.md).
+**Status:** proposed release plan, 2026-10-08. The 0.1 MVP, core 0.2 formats/filters, and 0.3 reporting features are implemented. The 0.4 follow implementation is Windows-tested and Linux integration-tested. The 0.5 TUI has a first bounded-cache implementation; Linux PTY validation and full historical navigation remain. macOS validation is deferred to the 1.0 MVP as requested. See [validation notes](VALIDATION.md). This roadmap stages the [1.0 technical contract](TECHNICAL_SPECIFICATION.md).
 
 ## Product decision
 
@@ -60,21 +60,21 @@ The current implementation includes separate RFC 3164 and RFC 5424 parsers, Apac
 
 ## 0.3: export and statistics
 
-Add streamed text and CSV export with `--output`, `--columns`, and explicit `--force` overwrite. Add exact physical/parsed/rejected/selected and per-level counts, a 256-bin timeline over unambiguous timestamps, and bounded estimated frequent field/value candidates. Statistics describe the selected records; estimate labels and `UNKNOWN_TIME` are visible.
+The current implementation adds streamed text/CSV export with `--output`, `--columns`, and explicit `--force` overwrite. `--stats` reports exact physical/parsed/rejected/selected record counts and exact per-level counts, a 256-bin timeline over unambiguous timestamps, and bounded Space-Saving estimates for frequent field/value pairs. Statistics describe selected records; estimates are labelled and ambiguous timestamps are counted separately. Timeline bins require a second streaming pass.
 
-**Gate:** byte-level text export and CSV quoting tests pass, including non-ASCII, quotes, commas, invalid UTF-8 replacement in CSV, empty values, write errors, and no matches. Exact counts match fixtures; heavy-hitter output is marked estimated. A large scan still meets the memory target.
+**Gate:** implemented tests cover text export, CSV quoting, invalid UTF-8 replacement, decoded line breaks, output overwrite protection, exact statistics, ISO timestamps with offsets, Apache timestamps, and frequent-value estimates. Follow-up release hardening remains in the 0.9 validation stage, including cross-platform builds and a measured peak-memory check.
 
 ## 0.4: follow
 
-Add `--follow`, `--from-start`, and `--flush-partial` for batch output. Follow complete appended lines, detect truncation and file replacement, drain the old handle, and reopen the new path. Keep the documented rapid-rotation loss limitation explicit.
+The implementation adds `--follow`, `--from-start`, and `--flush-partial` for batch output. Follow waits for complete appended lines, detects truncation and file replacement, then restarts from byte zero. Rapid rotations between polls can still lose records.
 
-**Gate:** scripted append, partial-line, truncate, rename/replacement, reopen-failure, and Ctrl-C cases pass on each platform. No duplicate complete record is emitted in the normal append/truncate/replacement test paths. New complete records are visible within one second on the release test machine under normal load.
+**Gate:** Windows tests cover append, partial-line handling, truncation, default EOF start, and `--from-start`. POSIX tests also cover rename/replacement and Ctrl-C partial flush. Linux test run and error/reopen cases remain to be confirmed. No duplicate complete record should be emitted in normal append/truncate/replacement paths; new lines should appear within one second.
 
 ## 0.5: terminal interface
 
-Add `--tui` with scrolling, search, highlighting, filter edits, help, summary, and follow integration. Use a bounded viewport cache and sparse checkpoints; rescan on distant jumps and after filter changes. Reject unsupported terminals clearly and sanitize log control bytes before rendering.
+The first `--tui` implementation provides progress rendering, scrolling within a 256-row ring, regex search and row highlighting, dynamic filter/raw-regex edits with a rescan, help, and terminal restoration. Rows keep at most 1 KiB of display text. Remaining work adds checkpoint-backed navigation across the full file, search beyond cached previews, follow integration, and broader terminal behavior. Unsupported non-interactive streams fail clearly; log control bytes are sanitized.
 
-**Gate:** manual scenarios pass on Windows Terminal and representative macOS/Linux terminals. Key input remains responsive during a 1 GiB scan; target p95 input-to-redraw latency is at most 200 ms on the documented release test machine. Resizing, invalid filter edits, long lines, and terminal restoration after errors are included.
+**Gate:** Windows build and non-terminal rejection tests pass. A POSIX PTY scenario is in the suite but awaits a Linux run. Full-file navigation, search, resize, invalid filter edits, long lines, follow integration, and terminal restoration still need validation before 0.5 is complete.
 
 ## 0.9: release candidate and 1.0 decision
 

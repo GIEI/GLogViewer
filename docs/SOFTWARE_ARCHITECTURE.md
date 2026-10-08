@@ -1,6 +1,6 @@
 # Software Architecture
 
-**Status:** proposed 1.0 design with 0.1 implemented and 0.2 structured-format work in progress. The behavioral contract is in [Technical Specification](TECHNICAL_SPECIFICATION.md), and delivery stages are in the [roadmap](ROADMAP.md).
+**Status:** proposed 1.0 design with 0.1–0.4 implemented and validated on Windows/Linux; the first 0.5 TUI slice is implemented and awaits Linux PTY validation. Full historical navigation and TUI follow integration remain. The behavioral contract is in [Technical Specification](TECHNICAL_SPECIFICATION.md), and delivery stages are in the [roadmap](ROADMAP.md).
 
 ## 1. Architectural goals
 
@@ -28,7 +28,8 @@ flowchart LR
 | Module | Responsibilities | Interface boundary |
 | --- | --- | --- |
 | `cli` | Parse arguments, validate combinations, choose mode and exit status | Produces immutable `ExecutionPlan`. |
-| `line_reader` | Reusable bounded buffer, LF/CRLF handling, 64-bit offsets, final partial line | Emits transient `LineView`. |
+| `line_reader` | Reusable bounded buffer, LF/CRLF handling, 64-bit offsets, final partial line, seek/reposition for follow | Emits transient `LineView`. |
+| `follow` | Poll file size and identity; wait for complete lines; reopen rotations and reset truncated inputs | Repositions the reader and preserves the last complete line number. |
 | `format_detect` | Bounded sample and confidence scoring | Chooses a preset or raw mode. |
 | `parser_syslog` | Distinct RFC 3164-like and RFC 5424 parsers | Fills normalized fields without changing raw data. |
 | `parser_http` | Apache Common/Combined and NGINX Combined parsers | Fills access-specific fields. |
@@ -37,10 +38,10 @@ flowchart LR
 | `regex_compile` | Lex and parse supported regex into AST; reject invalid syntax | Emits immutable NFA program and capture metadata. |
 | `regex_vm` | Iterative NFA matching and match spans | Reads byte slices; enforces state and work limits. |
 | `filter` | Compile expression grammar and evaluate predicates | Reads `LogEntry`, never mutates it. |
-| `stats` | Exact counters, fixed timeline, bounded heavy hitters | Outputs explicit estimates. |
-| `export` | Stream raw text or CSV with escaping and short-write handling | Consumes selected entries immediately. |
-| `follow` | Poll, detect append/truncation/replacement, maintain reader state | Supplies events to pipeline. |
-| `tui` | Input, viewport, search, status/help, clipped rendering | Uses bounded row cache and scan checkpoints. |
+| `stats` | Exact physical/parsed/rejected/selected and per-level counts | Fixed-bin timeline and bounded Space-Saving estimates. |
+| `export` | Stream raw text or CSV with escaping, UTF-8 replacement, and short-write handling | Consumes selected entries immediately; protects existing files by default. |
+| `follow` | Poll, detect append/truncation/replacement, wait for complete records, and maintain reader state | Repositions the shared reader for the pipeline. |
+| `tui` | Input, bounded viewport, search, dynamic filter edits, help, clipped rendering | Retains 256 rows with 1 KiB previews; historical checkpoints and follow integration remain. |
 | `platform` | 64-bit seek/stat, sleep, file identity, terminal mode and input | POSIX and Win32 implementations with a common header. |
 
 Proposed layout:
@@ -60,7 +61,7 @@ Makefile
 build.bat
 ```
 
-The current implementation uses `include/logview.h`, `src/main.c`, `src/reader.c`, `src/reader.h`, `src/jsonl.c`, `src/jsonl.h`, `src/parsers.c`, `src/parsers.h`, `src/filter.c`, `src/filter.h`, `src/regex.c`, `src/regex.h`, and `tests/test_cli.py`. Statistics, export, follow, and TUI modules in the full target layout remain planned.
+The current implementation uses `include/logview.h`, `src/main.c`, `src/reader.c`, `src/reader.h`, `src/follow.c`, `src/follow.h`, `src/terminal.c`, `src/terminal.h`, `src/tui.c`, `src/tui.h`, `src/jsonl.c`, `src/jsonl.h`, `src/parsers.c`, `src/parsers.h`, `src/filter.c`, `src/filter.h`, `src/output.c`, `src/output.h`, `src/stats.c`, `src/stats.h`, `src/regex.c`, `src/regex.h`, and `tests/test_cli.py`.
 
 ## 3. Data contracts and lifetime
 
@@ -94,7 +95,7 @@ The execution plan owns compiled regex programs and custom pattern instructions 
 6. Send selected entries to exactly one primary sink: batch text, export, stats, or TUI. Global parsed/rejected counters update regardless of selection.
 7. Release the transient entry implicitly when reading the next line.
 
-Statistics with timeline use a first pass to determine the time range and a second pass to fill 256 bins; both passes are streaming. The file's initial size is the snapshot boundary. If the file changes between passes, the stats result reports an input-changed error rather than silently mixing snapshots. A later enhancement may allow a live approximate timeline.
+The statistics sink accumulates exact record and level counters plus a 512-entry Space-Saving table in fixed memory. Timeline output uses the first pass to determine the time range and a second streaming pass to fill 256 bins. The second pass reapplies the same parser and selection plan; timestamps outside the first-pass range signal a changed input or inconsistent parse.
 
 ## 5. Regex architecture
 
@@ -135,10 +136,10 @@ The core sees `platform_file_open`, `platform_file_seek64`, `platform_file_ident
 | Release | Architectural slice | Gate |
 | --- | --- | --- |
 | 0.1 MVP | Reader, raw/JSON Lines parser, regex compiler/VM, simple equality filter, CLI text sink | Implemented; Windows build and CLI checks pass; >1 GiB and macOS/Linux validation remain. |
-| 0.2 in progress | Syslog/HTTP/custom parsers, detection, filter-expression compiler | Core CLI checks pass on Windows; broader golden fixtures and other platform validation remain. |
-| 0.3 | CSV/text export and statistics sinks | Escaping, exact-count, and bounded-estimate tests. |
-| 0.4 | Follow controller | Append, truncate, rotation, and interruption tests. |
-| 0.5 | TUI event loop and bounded navigation cache | Cross-platform interactive and responsiveness checks. |
+| 0.2 implemented | Syslog/HTTP/custom parsers, detection, filter-expression compiler | Core CLI checks pass on Windows and Linux; broader golden fixtures remain part of release hardening. |
+| 0.3 implemented | CSV/text export, exact record/level statistics, timeline, bounded estimates | Windows tests pass; large sample tests also pass on Linux. |
+| 0.4 implemented | Batch follow controller | Windows and Linux append/partial/truncate/from-start/rotation/Ctrl-C tests pass. |
+| 0.5 in progress | Initial TUI with bounded viewport, search, filters, and help | Windows build and non-terminal checks pass; POSIX PTY scenario awaits Linux execution; historical navigation remains. |
 | 0.9–1.0 | Hardening, benchmark, documentation, release packaging | Published evidence for every 1.0 gate. |
 
 The detailed scope and pass criteria for each release are in [Roadmap to Version 1.0](ROADMAP.md).

@@ -211,10 +211,12 @@ static int parse_syslog3164(LogEntry *entry)
     if (!parse_token(data, length, &position, &host_start, &host_length)) return 0;
     while (position < length && data[position] == ' ') position++;
     tag_start = position;
-    while (position < length && data[position] != ':' && data[position] != ' ' && data[position] != '[') position++;
+    while (position < length && data[position] != ':' && data[position] != '[') position++;
     if (position == tag_start || position >= length ||
         (data[position] != ':' && data[position] != '[')) return 0;
     tag_length = position - tag_start;
+    trim_span(data, &tag_start, &tag_length);
+    if (tag_length == 0) return 0;
     entry->field_count = 0;
     if (position < length && data[position] == '[') {
         size_t pid_start = ++position;

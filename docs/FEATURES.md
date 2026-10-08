@@ -1,6 +1,6 @@
 # Feature Catalogue and Product Positioning
 
-**Status:** this catalogue describes the 1.0 target. The 0.1 MVP and much of 0.2 are implemented; the [roadmap](ROADMAP.md) assigns the remaining features to milestones. Exact 1.0 behavior is specified in [Technical Specification](TECHNICAL_SPECIFICATION.md).
+**Status:** this catalogue describes the 1.0 target. The 0.1 MVP, core 0.2 formats/filters, and 0.3 export/statistics are implemented. The 0.4 follow feature is implemented and awaits Linux integration confirmation. macOS testing is scheduled with the 1.0 MVP. The [roadmap](ROADMAP.md) tracks remaining work. Exact 1.0 behavior is specified in [Technical Specification](TECHNICAL_SPECIFICATION.md).
 
 ## 1. Users and jobs
 

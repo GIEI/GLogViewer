@@ -1,7 +1,7 @@
 # Technical Specification
 
 **Project:** GLogViewer (`logview`)  
-**Status:** 1.0 design target; 0.1 is implemented and 0.2 format/filter work is in progress. See the [roadmap](ROADMAP.md).  
+**Status:** 1.0 design target; 0.1, core 0.2, and 0.3 reporting are implemented. Cross-platform and release validation remain. See the [roadmap](ROADMAP.md).
 **Language:** C99; all repository content is English.
 
 ## 1. Purpose and scope
@@ -114,7 +114,7 @@ The compiler builds an AST for syntax validation and then a Thompson-style NFA p
 
 ## 8. Statistics
 
-`--stats` reports exact counts of physical, parsed, rejected, and selected records. Per-level counts, timeline bins, and frequent fields describe **selected** records; missing level appears as `UNSPECIFIED`. A fixed 256-bin timeline covers the observed timestamp range, so a two-pass scan is used for timeline output on seekable files; timestamps lacking a zone or otherwise ambiguous are listed as `UNKNOWN_TIME` and omitted from bins. The time range and bin width are printed. Frequent field-name and field-value pairs use a bounded Space-Saving table of 512 candidates; their counts are estimates and are marked `estimated`. Exact top-frequency data for arbitrary cardinality would violate fixed memory. A `--stats` request on a changing file is a snapshot of the size recorded when scanning begins.
+`--stats` reports exact counts of physical, parsed, rejected, and selected records. Per-level counts, timeline bins, and frequent fields describe **selected** records; missing level appears as `UNSPECIFIED`. A fixed 256-bin timeline covers the observed timestamp range, so a two-pass scan is used for timeline output on seekable files; timestamps lacking a zone or otherwise ambiguous are listed as `UNKNOWN_TIME` and omitted from bins. The time range and bin width are printed. ISO/RFC 3339 timestamps with `Z` or numeric offsets and Apache Combined timestamps are interpreted. Frequent field-name and field-value pairs use a bounded Space-Saving table of 512 candidates; their counts are estimates and are marked `estimated`. Exact top-frequency data for arbitrary cardinality would violate fixed memory. The timeline's second pass reapplies the same parser and filters; timestamps beyond the first-pass range cause a read/statistics error.
 
 ## 9. Export
 
@@ -122,7 +122,9 @@ Text export writes selected raw lines and one LF terminator per record, preservi
 
 ## 10. Follow and TUI behavior
 
-Snapshot mode begins at byte zero. `--follow` begins at the current end unless `--from-start` is set. It polls at 250 ms nominal intervals. On truncation it resets to offset zero and shows a notice. On file identity change it closes the old handle and opens the new path from offset zero after draining complete old lines. Identity uses device/inode on Unix and file ID where available on Windows; a documented fallback compares path, size, and modification time. Follow does not promise zero-loss handling across a fast sequence of rotations. Ctrl-C exits cleanly with code 0.
+Snapshot mode begins at byte zero. `--follow` begins at the current end unless `--from-start` is set. It polls at 250 ms nominal intervals and waits for newline-terminated records. On truncation it resets to offset zero. On file identity change it closes the old handle and opens the new path from offset zero. Identity uses device/inode on Unix and file ID on Windows. Follow does not promise zero-loss handling across a fast sequence of rotations. Ctrl-C exits cleanly with code 0; `--flush-partial` emits a pending incomplete record on interruption. `--follow` cannot be combined with statistics or export.
+
+The initial `--tui` implementation requires an interactive terminal. It keeps a 256-row ring with up to 1 KiB of display bytes per row, sanitizes control bytes, and supports arrows, paging, Home/End within the retained window, regex search, next/previous match, field-filter/raw-regex edits with a rescan, help, and quit. Search operates on retained previews, not the full raw lines. Checkpoint-backed navigation over older file regions, resize testing, and follow integration remain 0.5 work. Terminal state must be restored on normal exit and recoverable errors.
 
 The TUI shows a viewport of selected records, current format, scan progress, rejected-record count, and active filters. Arrow/Page Up/Page Down/Home/End navigate; `/` opens incremental regex search, `n`/`N` move between matches, `f` edits the field filter, `r` edits the raw regex, `s` opens summary, `?` shows help, and `q` quits. A bounded ring of displayed rows plus sparse byte-offset checkpoints supports scrolling; jumping far backward may rescan from a checkpoint. Filter changes invalidate the displayed match cache and trigger a cancellable rescan. Scanning is sliced between input/render polls, so input remains responsive. ANSI output is used on Unix terminals; Windows enables virtual terminal output where available and uses Win32 console calls for input. Terminals without required capability receive a clear error; redirected output uses batch mode.
 
