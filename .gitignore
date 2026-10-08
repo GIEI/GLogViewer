@@ -50,3 +50,9 @@ modules.order
 Module.symvers
 Mkfile.old
 dkms.conf
+
+# Sample files
+SAMPLES/
+
+# Build output
+build/
