@@ -380,16 +380,34 @@ def main():
                     if not chunk:
                         break
                     tui_output.extend(chunk)
-                require(tui_process.returncode == 0 and
-                        b"connection timeout" in tui_output and
-                        b'2 {"level":"ERROR","message":"connection timeout"}' in tui_output and
-                        b'3 {"level":"WARN","message":"disk usage high"}' in tui_output and
-                        b"Context around source line 3" in tui_output and
-                        b"\033[11;1H\033[2K" in tui_output and
-                        b"Search: timeout" in tui_output and
-                        b"Invalid filter:" in tui_output and
-                        termios.tcgetattr(slave_fd) == original_terminal,
-                        "TUI should handle invalid filters, restore the terminal, and retain navigation features")
+                restored_terminal = termios.tcgetattr(slave_fd)
+                terminal_restored = (
+                    (restored_terminal[0] & (termios.IXON | termios.ICRNL)) ==
+                    (original_terminal[0] & (termios.IXON | termios.ICRNL)) and
+                    (restored_terminal[3] & (termios.ICANON | termios.ECHO)) ==
+                    (original_terminal[3] & (termios.ICANON | termios.ECHO)) and
+                    restored_terminal[6][termios.VMIN] == original_terminal[6][termios.VMIN] and
+                    restored_terminal[6][termios.VTIME] == original_terminal[6][termios.VTIME]
+                )
+                tui_checks = {
+                    "normal exit": tui_process.returncode == 0,
+                    "search result": b"connection timeout" in tui_output,
+                    "error navigation": b'2 {"level":"ERROR","message":"connection timeout"}' in tui_output,
+                    "warning navigation": b'3 {"level":"WARN","message":"disk usage high"}' in tui_output,
+                    "context view": b"Context around source line 3" in tui_output,
+                    "resize redraw": b"\033[11;1H\033[2K" in tui_output,
+                    "search status": b"Search: timeout" in tui_output,
+                    "invalid filter diagnostic": b"Invalid filter:" in tui_output,
+                    "terminal mode restoration": terminal_restored,
+                }
+                failed_checks = [name for name, passed in tui_checks.items() if not passed]
+                require(not failed_checks,
+                        "TUI PTY checks failed: {}; terminal fields changed: {}; output tail={!r}".format(
+                            failed_checks,
+                            [(index, original_terminal[index], restored_terminal[index])
+                             for index in range(len(original_terminal))
+                             if original_terminal[index] != restored_terminal[index]],
+                            bytes(tui_output[-1200:])))
             finally:
                 if tui_process.poll() is None:
                     tui_process.kill()
