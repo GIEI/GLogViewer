@@ -8,7 +8,18 @@
 
 ## Build and options
 
-On Windows, run `build.bat` with Visual Studio C++ Build Tools installed. On macOS/Linux, run `make` with a C99 compiler. The command-line test suite is `python tests/test_cli.py build/logview.exe` on Windows or `make test` on macOS/Linux.
+On Windows, run these separate commands in PowerShell with Visual Studio C++ Build Tools installed:
+
+```powershell
+.\build.bat
+python tests\test_cli.py build\logview.exe
+```
+
+`build.bat` rebuilds the executable, so Windows does not need a separate clean step. The `make clean && make test` sequence applies to macOS/Linux, where Make is available:
+
+```sh
+make clean && make test
+```
 
 The current CLI supports one file and these options:
 

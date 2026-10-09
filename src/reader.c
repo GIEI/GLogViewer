@@ -13,12 +13,12 @@
 #include <sys/types.h>
 #endif
 
-static int reader_byte(LineReader *reader)
+static int reader_fill(LineReader *reader)
 {
     if (reader->input_position >= reader->input_length) {
         size_t amount;
         if (reader->input_eof || reader->input_error) {
-            return -1;
+            return 0;
         }
         amount = fread(reader->input, 1, sizeof(reader->input), reader->file);
         reader->input_position = 0;
@@ -29,10 +29,10 @@ static int reader_byte(LineReader *reader)
             } else {
                 reader->input_eof = 1;
             }
-            return -1;
+            return 0;
         }
     }
-    return reader->input[reader->input_position++];
+    return 1;
 }
 
 static int reader_grow_line(LineReader *reader)
@@ -111,8 +111,13 @@ ReaderResult reader_next(LineReader *reader, const unsigned char **line,
     int too_long = 0;
 
     for (;;) {
-        int byte = reader_byte(reader);
-        if (byte < 0) {
+        const unsigned char *start;
+        const unsigned char *newline;
+        size_t available;
+        size_t amount;
+        size_t consumed;
+
+        if (!reader_fill(reader)) {
             if (reader->input_error) {
                 return READER_ERROR;
             }
@@ -122,24 +127,32 @@ ReaderResult reader_next(LineReader *reader, const unsigned char **line,
             break;
         }
 
+        start = reader->input + reader->input_position;
+        available = reader->input_length - reader->input_position;
+        newline = (const unsigned char *)memchr(start, '\n', available);
+        amount = newline != NULL ? (size_t)(newline - start) : available;
+        consumed = amount + (newline != NULL ? 1u : 0u);
         saw_byte = 1;
-        reader->next_offset++;
-        if (byte == '\n') {
-            ended_with_lf = 1;
-            break;
-        }
+        reader->input_position += consumed;
+        reader->next_offset += consumed;
 
         if (!too_long) {
-            if (length == reader->max_line_bytes) {
+            if (amount > reader->max_line_bytes - length) {
                 too_long = 1;
                 length = 0;
-            } else {
-                if (length == reader->line_capacity &&
-                    !reader_grow_line(reader)) {
-                    return READER_ERROR;
+            } else if (amount != 0) {
+                while (length + amount > reader->line_capacity) {
+                    if (!reader_grow_line(reader)) {
+                        return READER_ERROR;
+                    }
                 }
-                reader->line[length++] = (unsigned char)byte;
+                memcpy(reader->line + length, start, amount);
+                length += amount;
             }
+        }
+        if (newline != NULL) {
+            ended_with_lf = 1;
+            break;
         }
     }
 

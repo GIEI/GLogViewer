@@ -1,8 +1,30 @@
 # Validation Notes
 
-**Status:** local validation evidence, 2026-10-08. These measurements are observations from one development machine and are not release benchmarks.
+**Status:** local validation evidence, 2026-10-09. These measurements are observations from one development machine and are not release benchmarks.
+
+## Reader optimization comparison
+
+The line reader now searches each available input-buffer span for LF with `memchr` and appends spans with `memcpy`, instead of handling every byte through the old byte-reader loop. It keeps the reusable 64 KiB input buffer, exact maximum-line behavior, CRLF normalization, source offsets, and oversized-line draining. `tests/test_cli.py` includes refill-boundary and line-limit cases. The full Windows CLI suite passes with this reader.
+
+`tests/benchmark_compare.py` compares a baseline and candidate binary on the available samples. It performs one warm-up per binary, alternates run order for five measured runs, discards stdout, checks exit status and diagnostics, and reports medians and binary hashes. The run on Windows 11 with MSVC `/O2`, on the workstation reported as Ryzen 5800/Radeon RX 6900 XT, produced these preliminary results:
+
+To repeat the comparison, keep a copy of the old executable, build the candidate as `build/logview.exe`, then run `python tests/benchmark_compare.py build/logview-before.exe build/logview.exe --runs 5 --output build/reader-benchmark.json`.
+
+| Sample and operation | Old reader | Block reader | Speedup |
+| --- | ---: | ---: | ---: |
+| `enwik8`, raw output discarded | 0.907 s | 0.820 s | 1.11x |
+| `Linux_1GB.syslog`, RFC 3164 parse and unmatched PID filter | 1.900 s | 0.893 s | 2.13x |
+| `http_access_500MB.log`, Apache Combined parse and unmatched status filter | 1.097 s | 0.592 s | 1.85x |
+
+These are cached-input sample comparisons, not the formal unfiltered 1 GiB release benchmark. AVX2-only compilation (`/O2 /arch:AVX2`) showed no stable improvement on the HTTP sample: the median was 1.146 s compared with 1.097 s for `/O2`. The measured process CPU time was close to wall time, consistent with the current single-thread scan keeping one CPU core busy. The GPU is not used by the application.
+
+The block scanner follows a low-risk first optimization: optimized C library search and copy routines operate over spans while line parsing and filtering stay unchanged. The [simdjson paper](https://arxiv.org/abs/1902.08318) shows that SIMD structural scanning can improve parsing throughput even on one core; adopting a full SIMD JSON parser would add complexity and a dependency, so it is not the first step here. [Hyperscan's NSDI 2019 paper](https://www.usenix.org/conference/nsdi19/presentation/wang-xiang) uses SIMD automata and pattern decomposition for large regex sets, a different workload from GLogViewer's single custom regex and built-in engine. The [simdjson `parse_many` design](https://github.com/simdjson/simdjson/blob/master/doc/parse_many.md) is a useful batching precedent: it reuses parser state and overlaps independent stages.
+
+Multithreaded batch filtering remains a follow-up. A safe design needs newline-aligned batches, a bounded work queue, worker-owned parser scratch, and ordered output. The custom parser currently has mutable static state, and the frequent-value statistics sketch depends on record order; these must be addressed or excluded before enabling concurrent parsing. The [GNU Parallel `--pipe-part` design](https://www.gnu.org/software/parallel/parallel_design.html) is a useful reference for file blocks, job limits, and ordered results. The existing benchmark script can measure later changes against these workloads.
 
 ## Windows CLI validation
+
+The project uses `build.bat` on Windows; the Makefile targets (`make clean` and `make test`) are for macOS/Linux shells.
 
 The following commands completed successfully in the repository workspace:
 

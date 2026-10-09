@@ -23,6 +23,51 @@ def require(condition, message):
         raise AssertionError(message)
 
 
+def check_reader_boundaries(binary, root):
+    boundary_file = root / "reader-boundary.log"
+    for length in (65534, 65535, 65536, 65537, 131073):
+        for terminator in (b"\n", b"\r\n"):
+            payload = b"x" * length
+            boundary_file.write_bytes(payload + terminator + b"\nend\n")
+            result = run(binary, str(boundary_file))
+            require(result.returncode == 0 and result.stderr == b"" and
+                    result.stdout == payload + b"\n\nend\n",
+                    "reader should preserve records across refill boundaries "
+                    "(length={}, terminator={!r})".format(length, terminator))
+
+    # The byte limit includes CR before CRLF normalization, but excludes LF.
+    limit = 65536
+    records = [b"a" * limit + b"\n", b"b" * (limit + 1) + b"\n",
+               b"\n", b"c" * (limit - 1) + b"\r\n",
+               b"d" * limit + b"\r\n", b"valid\n", b"final\r"]
+    boundary_file.write_bytes(b"".join(records))
+    expected = (b"a" * limit + b"\n\n" + b"c" * (limit - 1) +
+                b"\nvalid\nfinal\r\n")
+    result = run(binary, str(boundary_file), "--max-line-bytes", str(limit))
+    require(result.returncode == 0 and result.stdout == expected and
+            b"skipped 2 invalid or oversized record(s)" in result.stderr,
+            "reader should enforce the exact byte limit, drain oversized records, "
+            "and preserve an unterminated final CR")
+    csv_file = root / "reader-boundary.csv"
+    exported = run(binary, str(boundary_file), "--max-line-bytes", str(limit),
+                   "--export", "csv", "--output", str(csv_file),
+                   "--columns", "line_number,raw")
+    require(exported.returncode == 0, "reader boundary CSV export should succeed")
+    with csv_file.open("r", encoding="utf-8", newline="") as stream:
+        rows = list(csv.reader(stream))
+    require(exported.returncode == 0 and rows == [
+                ["line_number", "raw"], ["1", "a" * limit], ["3", ""],
+                ["4", "c" * (limit - 1)], ["6", "valid"], ["7", "final\r"]],
+            "CSV physical line numbers should include empty and oversized records")
+
+    for ending, expected in ((b"\r", b"\n\nlast\r\n"),
+                             (b"\r\n", b"\n\nlast\n")):
+        boundary_file.write_bytes(b"\n\r\nlast" + ending)
+        result = run(binary, str(boundary_file))
+        require(result.returncode == 0 and result.stdout == expected,
+                "reader should preserve empty records and normalize CR only before LF")
+
+
 def main():
     binary = Path(sys.argv[1]).resolve()
     help_result = run(binary, "--help")
@@ -43,6 +88,7 @@ def main():
         dir=scratch_root,
     ) as temporary:
         root = Path(temporary)
+        check_reader_boundaries(binary, root)
 
         raw_file = root / "raw.log"
         raw_file.write_bytes(b"first timeout\r\nsecond line\nlast timeout")

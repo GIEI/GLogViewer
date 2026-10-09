@@ -12,19 +12,21 @@ GLogViewer is a cross-platform, dependency-free C99 tool for exploring large str
 
 ## Build
 
-On Windows, run from PowerShell:
+On Windows, use the batch build script and Python test runner from PowerShell. The Unix `make` targets are not available in a standard Windows shell:
 
 ```powershell
 .\build.bat
 python tests\test_cli.py build\logview.exe
 ```
 
-The build script locates the latest Visual Studio C++ Build Tools installation. On macOS or Linux, use a C99 compiler and Make:
+The build script locates the latest Visual Studio C++ Build Tools installation and rebuilds the executable, so there is no separate `make clean` step. On macOS or Linux, use a C99 compiler and Make:
 
 ```sh
 make
 make test
 ```
+
+On macOS/Linux, `make clean && make test` is also supported when you want to remove the previous executable before testing.
 
 The Linux Makefile and test suite have passed on the user's Linux machine. macOS validation is deferred to the 1.0 MVP. Tests use temporary fixtures under `build/test-tmp` and scan local samples when present.
 
