@@ -154,7 +154,13 @@ jobs:
           RELEASE_TAG: ${{ github.ref_name }}
         run: |
           sha256sum release-assets/* > release-assets/SHA256SUMS.txt
-          gh release create "$RELEASE_TAG" release-assets/* \
-            --verify-tag \
-            --title "GLogViewer $RELEASE_TAG" \
+          release_options=(
+            --verify-tag
+            --title "GLogViewer $RELEASE_TAG"
             --generate-notes
+          )
+          if [[ "$RELEASE_TAG" == *-* ]]; then
+            release_options+=(--prerelease)
+          fi
+          gh release create "$RELEASE_TAG" release-assets/* \
+            "${release_options[@]}"
