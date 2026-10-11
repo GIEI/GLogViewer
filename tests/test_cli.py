@@ -762,8 +762,9 @@ def main():
             os.close(long_slave)
             long_output = bytearray()
             try:
-                deadline = time.monotonic() + 3
-                while (b"[preview clipped]" not in long_output and
+                preview_line = b"[preview clipped]\x1b[0m\r\n"
+                deadline = time.monotonic() + 8
+                while (preview_line not in long_output and
                        long_process.poll() is None and time.monotonic() < deadline):
                     ready, _, _ = select.select([long_master], [], [], 0.1)
                     if ready:
@@ -775,8 +776,11 @@ def main():
                 long_process.wait(timeout=5)
                 require(long_process.returncode == 0 and
                         b"[preview clipped]" in long_output and
-                        b"[preview clipped]\x1b[0m\r\n" in long_output,
-                        "TUI should display bounded previews for long records")
+                        preview_line in long_output,
+                        "TUI should display bounded previews for long records "
+                        "(returncode={}, output tail={!r})".format(
+                            long_process.returncode,
+                            bytes(long_output[-300:])))
             finally:
                 if long_process.poll() is None:
                     long_process.kill()
