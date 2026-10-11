@@ -20,7 +20,7 @@ static int reader_fill(LineReader *reader)
         if (reader->input_eof || reader->input_error) {
             return 0;
         }
-        amount = fread(reader->input, 1, sizeof(reader->input), reader->file);
+        amount = fread(reader->input, 1, reader->input_capacity, reader->file);
         reader->input_position = 0;
         reader->input_length = amount;
         if (amount == 0) {
@@ -71,11 +71,15 @@ int reader_init(LineReader *reader, FILE *file, size_t max_line_bytes)
     }
     reader->file = file;
     reader->max_line_bytes = max_line_bytes;
+    reader->input = (unsigned char *)malloc(LOGVIEW_INPUT_BUFFER_SIZE);
+    if (reader->input == NULL) return 0;
+    reader->input_capacity = LOGVIEW_INPUT_BUFFER_SIZE;
     return 1;
 }
 
 void reader_destroy(LineReader *reader)
 {
+    free(reader->input);
     free(reader->line);
     free(reader->json_record);
     memset(reader, 0, sizeof(*reader));

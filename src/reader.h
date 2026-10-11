@@ -7,6 +7,10 @@
 
 #include "logview.h"
 
+#ifndef LOGVIEW_INPUT_BUFFER_SIZE
+#define LOGVIEW_INPUT_BUFFER_SIZE 262144u
+#endif
+
 typedef enum {
     READER_LINE,
     READER_EOF,
@@ -24,7 +28,8 @@ typedef struct {
     size_t line_length;
     size_t line_capacity;
     size_t max_line_bytes;
-    unsigned char input[65536];
+    unsigned char *input;
+    size_t input_capacity;
     size_t input_length;
     size_t input_position;
     uint64_t next_offset;

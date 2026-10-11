@@ -17,6 +17,7 @@
 #ifdef _WIN32
 #include <fcntl.h>
 #include <io.h>
+#include <windows.h>
 #endif
 
 #define LOGVIEW_VERSION "0.2.0-dev"
@@ -284,6 +285,48 @@ static void print_io_error(const char *operation, const char *path)
             strerror(errno));
 }
 
+static FILE *open_input_file(const char *path, int sequential)
+{
+#ifdef _WIN32
+    DWORD flags = FILE_ATTRIBUTE_NORMAL;
+    HANDLE handle;
+    int descriptor;
+    FILE *stream;
+
+    if (sequential) flags |= FILE_FLAG_SEQUENTIAL_SCAN;
+    handle = CreateFileA(path, GENERIC_READ,
+                         FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+                         NULL, OPEN_EXISTING, flags, NULL);
+    if (handle == INVALID_HANDLE_VALUE) {
+        DWORD error = GetLastError();
+        if (error == ERROR_FILE_NOT_FOUND || error == ERROR_PATH_NOT_FOUND) {
+            errno = ENOENT;
+        } else if (error == ERROR_ACCESS_DENIED ||
+                   error == ERROR_SHARING_VIOLATION) {
+            errno = EACCES;
+        } else if (error == ERROR_TOO_MANY_OPEN_FILES) {
+            errno = EMFILE;
+        } else if (error == ERROR_NOT_ENOUGH_MEMORY) {
+            errno = ENOMEM;
+        } else {
+            errno = EIO;
+        }
+        return NULL;
+    }
+    descriptor = _open_osfhandle((intptr_t)handle, _O_RDONLY | _O_BINARY);
+    if (descriptor < 0) {
+        CloseHandle(handle);
+        return NULL;
+    }
+    stream = _fdopen(descriptor, "rb");
+    if (stream == NULL) _close(descriptor);
+    return stream;
+#else
+    (void)sequential;
+    return fopen(path, "rb");
+#endif
+}
+
 static int detect_file_format(FILE *input, LineReader *reader,
                               size_t max_line_bytes, InputFormat *format)
 {
@@ -477,7 +520,7 @@ int main(int argc, char **argv)
         }
     }
 
-    input = fopen(options.input_path, "rb");
+    input = open_input_file(options.input_path, !options.tui_mode);
     if (input == NULL) {
         print_io_error("cannot open", options.input_path);
         goto cleanup;
