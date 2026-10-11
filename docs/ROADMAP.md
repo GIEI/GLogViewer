@@ -1,6 +1,6 @@
 # Roadmap to Version 1.0
 
-**Status:** release plan, 2026-10-11. The 0.1–0.5 milestones are implemented. The CLI suite is reported passing on Windows, Linux, and macOS; the expanded Linux PTY suite has passed. The GitHub Actions matrix passes on Windows, Linux, and macOS, and the Linux sanitizer job passes. The formal 1 GiB warm-cache benchmark passed on the Windows reference machine. The tagged `v0.5.0-alpha.2` workflow completed end-to-end, publishing platform archives and checksums as a GitHub prerelease. Broader release hardening and stable-release gates remain. See [validation notes](VALIDATION.md). This roadmap stages the [1.0 technical contract](TECHNICAL_SPECIFICATION.md).
+**Status:** release plan, 2026-10-11. Version 1.0.0 is prepared for stable publication. All 1.0 acceptance gates have evidence: Windows, Linux, and macOS build/test/package CI, Linux sanitizers, parser and follow regressions, user-reported manual TUI checks on Windows/macOS, and the Windows 1 GiB benchmark. The release workflow generates SHA-256 checksums and signed GitHub build-provenance attestations. The latest main CI run [38154893862](https://github.com/GIEI/GLogViewer/actions/runs/38154893862) passed. See [validation notes](VALIDATION.md).
 
 ## Product decision
 
@@ -54,31 +54,31 @@ Format auto-detection, syslog and HTTP presets, custom placeholders, `and`/`or` 
 
 ## 0.2: structured formats and expression language
 
-The current implementation includes separate RFC 3164 and RFC 5424 parsers, Apache Common/Combined and NGINX Combined access parsers, custom placeholders, bounded auto-detection with raw fallback, and a compiled equality/inequality/regex expression filter with `and`, `or`, and parentheses. It preserves original records and reports malformed or oversized record counts. Remaining 0.2 work is broader golden and malformed-input coverage, validation on other platforms, and closing the exit gate.
+The implementation includes separate RFC 3164 and RFC 5424 parsers, Apache Common/Combined and NGINX Combined access parsers, custom placeholders, bounded auto-detection with raw fallback, and a compiled equality/inequality/regex expression filter with `and`, `or`, and parentheses. It preserves original records and reports malformed or oversized record counts. Windows/Linux/macOS CI covers parser goldens for the RFC 3164 yearless timestamp, RFC 5424 structured data and malformed data, Apache escaped quotes, custom ambiguity and duplicate aliases, and filter precedence.
 
-**Gate:** parser goldens derived from the source standards and vendor documentation pass, including RFC 3164's missing year, RFC 5424 structured data, quoted HTTP fields, malformed lines, ambiguous custom patterns, and filter precedence. All existing 0.1 commands remain valid. [RFC 3164](https://www.rfc-editor.org/info/rfc3164/), [RFC 5424](https://www.rfc-editor.org/info/rfc5424/), [Apache logs](https://httpd.apache.org/docs/2.4/logs.html), [NGINX log module](https://nginx.org/en/docs/http/ngx_http_log_module.html)
+**Gate passed:** parser goldens derived from the source standards and vendor documentation pass across the CI platform matrix. All existing 0.1 commands remain valid. [RFC 3164](https://www.rfc-editor.org/info/rfc3164/), [RFC 5424](https://www.rfc-editor.org/info/rfc5424/), [Apache logs](https://httpd.apache.org/docs/2.4/logs.html), [NGINX log module](https://nginx.org/en/docs/http/ngx_http_log_module.html)
 
 ## 0.3: export and statistics
 
 The current implementation adds streamed text/CSV export with `--output`, `--columns`, and explicit `--force` overwrite. `--stats` reports exact physical/parsed/rejected/selected record counts and exact per-level counts, a 256-bin timeline over unambiguous timestamps, and bounded Space-Saving estimates for frequent field/value pairs. Statistics describe selected records; estimates are labelled and ambiguous timestamps are counted separately. Timeline bins require a second streaming pass.
 
-**Gate:** implemented tests cover text export, CSV quoting, invalid UTF-8 replacement, decoded line breaks, output overwrite protection, exact statistics, ISO timestamps with offsets, Apache timestamps, and frequent-value estimates. Follow-up release hardening remains in the 0.9 validation stage, including cross-platform builds and a measured peak-memory check.
+**Gate passed:** tests cover text export, CSV quoting, invalid UTF-8 replacement, decoded line breaks, output overwrite protection, exact statistics, ISO timestamps with offsets, Apache timestamps, and frequent-value estimates. Cross-platform builds, sanitizer checks, and the measured memory proxy are recorded in [validation notes](VALIDATION.md).
 
 ## 0.4: follow
 
-The implementation adds `--follow`, `--from-start`, and `--flush-partial` for batch output. Follow waits for complete appended lines, detects truncation and file replacement, then restarts from byte zero. Rapid rotations between polls can still lose records.
+The implementation adds `--follow`, `--from-start`, and `--flush-partial` for batch output. Follow waits for complete appended lines, detects truncation and file replacement, then restarts from byte zero. It recovers if the rotated path is temporarily missing and later reappears. Rapid rotations between polls can still lose records.
 
-**Gate:** Windows and Linux tests cover append, partial-line handling, truncation, default EOF start, and `--from-start`. POSIX tests also cover rename/replacement and Ctrl-C partial flush. Reopen/error handling and rapid-rotation races remain release-hardening cases. No duplicate complete record should be emitted in normal append/truncate/replacement paths; new lines should appear within one second.
+**Gate passed:** Windows and Linux tests cover append, partial-line handling, truncation, default EOF start, and `--from-start`. POSIX tests cover rename/replacement, temporary path absence followed by reopen, and Ctrl-C partial flush. Rapid rotations between polls remain a documented limitation; normal append/truncate/replacement paths are tested for duplicates, and appended lines appear within the polling interval.
 
 ## 0.5: terminal interface
 
-The `--tui` implementation provides a 256-row memory cache, temporary checkpoints, navigation and regex search across the full scan, error/warning jumps, context view, scrollable full-record zoom, follow mode with append/partial-line/rotation handling, row highlighting, dynamic filter/raw-regex edits with a rescan, resize handling, help, and terminal restoration. Rows keep at most 1 KiB of display text; search is limited to each row's displayed preview. Broader terminal behavior remains. Unsupported non-interactive streams fail clearly; log control bytes are sanitized.
+The `--tui` implementation provides a 256-row memory cache, temporary checkpoints, navigation and regex search across the full scan, error/warning jumps, context view, scrollable full-record zoom, follow mode with append/partial-line/rotation handling, row highlighting, dynamic filter/raw-regex edits with a rescan, resize handling, help, and terminal restoration. Rows keep at most 1 KiB of display text; search is limited to each row's displayed preview. Unsupported non-interactive streams fail clearly; log control bytes are sanitized.
 
-**Gate:** Windows build and non-terminal rejection tests pass. The expanded Linux PTY scenario passes and exercises historical search, severity jumps, context, resize, invalid filter edits, bounded previews for long lines, terminal restoration, TUI follow appends, partial records, and rotation. User-reported manual checks cover Windows Terminal and macOS; a repeatable terminal matrix remains part of release validation.
+**Gate passed:** Windows build and non-terminal rejection tests pass. The expanded Linux/macOS PTY scenarios exercise historical search, severity jumps, context, resize, invalid filter edits, bounded previews for long lines, terminal restoration, TUI follow appends, partial records, and rotation. The user has also reported successful interactive TUI use on Windows Terminal and macOS.
 
 ## 0.9: release candidate and 1.0 decision
 
-Freeze the 1.0 CLI and file-format behavior. Run the full test suite and sanitizer or equivalent checks available per platform; the suite now covers high-cardinality statistics, malformed input, long paths on POSIX, invalid UTF-8 CSV output, valid escaped and literal Unicode JSON, surrogate pairs, malformed UTF-8 classes, and output failures. The Linux sanitizer job passes. The Windows 1 GiB reference benchmark is recorded in [validation notes](VALIDATION.md); repeat it when the reference hardware or release build changes.
+The 1.0 CLI and file-format behavior is frozen. The full test suite and available sanitizers pass; coverage includes high-cardinality statistics, malformed input, long paths on POSIX, invalid UTF-8 CSV output, valid escaped and literal Unicode JSON, surrogate pairs, malformed UTF-8 classes, output failures, and the parser/follow release hardening cases. The Windows 1 GiB reference benchmark is recorded in [validation notes](VALIDATION.md).
 
 The 1.0 release requires:
 
@@ -89,4 +89,4 @@ The 1.0 release requires:
 5. The README and manual describe the actual binary, installation, examples, known limits, and security behavior; documentation examples are executed in CI where practical.
 6. All written project content and all code comments satisfy the English-only policy.
 
-Version 1.0 is the first stable release after these gates pass. Native systemd/Windows event readers, multi-file merge, compression, multiline reconstruction, and automatic template discovery remain candidates for post-1.0 work unless separately approved and specified.
+All gates are evidenced by CI run [38154893862](https://github.com/GIEI/GLogViewer/actions/runs/38154893862), the benchmark report in [validation notes](VALIDATION.md), and the user's recorded platform testing. The tagged workflow remains the final publication check. Native systemd/Windows event readers, multi-file merge, compression, multiline reconstruction, and automatic template discovery remain candidates for post-1.0 work unless separately approved and specified.

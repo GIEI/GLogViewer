@@ -1,7 +1,7 @@
 # Technical Specification
 
 **Project:** GLogViewer (`logview`)  
-**Status:** 1.0 design target; 0.1, core 0.2, and 0.3 reporting are implemented. Cross-platform and release validation remain. See the [roadmap](ROADMAP.md).
+**Status:** 1.0 stable behavior contract. The required format, filter, CLI, TUI, follow, export, and statistics features are implemented; release evidence is recorded in [validation notes](VALIDATION.md).
 **Language:** C99; all repository content is English.
 
 ## 1. Purpose and scope

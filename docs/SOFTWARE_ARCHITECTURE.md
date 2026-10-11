@@ -1,6 +1,6 @@
 # Software Architecture
 
-**Status:** 1.0 target architecture. Milestones 0.1–0.5 are implemented; Windows and Linux test suites have passed, and the user reports the macOS suite passing. The Windows 1 GiB benchmark passes; broader release hardening remains. The behavioral contract is in [Technical Specification](TECHNICAL_SPECIFICATION.md), and delivery stages are in the [roadmap](ROADMAP.md).
+**Status:** architecture for the stable 1.0 release. Milestones 0.1–0.5 are implemented; Windows, Linux, and macOS CI, Linux sanitizer checks, release packaging, and the Windows 1 GiB benchmark pass. The behavioral contract is in [Technical Specification](TECHNICAL_SPECIFICATION.md), and validation evidence is in [Validation notes](VALIDATION.md).
 
 ## 1. Architectural goals
 

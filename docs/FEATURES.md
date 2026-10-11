@@ -1,6 +1,6 @@
 # Feature Catalogue and Product Positioning
 
-**Status:** this catalogue describes the 1.0 target. The 0.1 MVP, core 0.2 formats/filters, 0.3 export/statistics, 0.4 follow, and 0.5 interactive exploration milestones are implemented. Windows and Linux test suites have passed, and the user reports the macOS suite passing. The cross-platform GitHub Actions workflow has passed its first run. The [roadmap](ROADMAP.md) tracks remaining work. Exact 1.0 behavior is specified in [Technical Specification](TECHNICAL_SPECIFICATION.md).
+**Status:** this catalogue describes the stable 1.0 release. The 0.1 MVP, core 0.2 formats/filters, 0.3 export/statistics, 0.4 follow, and 0.5 interactive exploration milestones are implemented. Windows, Linux, and macOS CI, Linux sanitizer checks, and release packaging pass. Exact behavior and known limits are specified in [Technical Specification](TECHNICAL_SPECIFICATION.md).
 
 ## 1. Users and jobs
 

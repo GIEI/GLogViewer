@@ -1,6 +1,6 @@
 # User Manual
 
-**Status:** the batch CLI includes the 0.1 MVP, core 0.2 formats/filters, 0.3 reporting, and 0.4 follow features. The 0.5 TUI supports full-scan navigation using temporary checkpoints, filter editing, context view, export of filtered/search-matched records, and live follow; Windows and Linux test suites have passed, and the user reports the macOS suite passing. The Windows 1 GiB benchmark passes; broader release hardening remains for 1.0. The [roadmap](ROADMAP.md) gives implementation status and release gates.
+**Status:** GLogViewer 1.0.0 is the first stable release. The Windows, Linux, and macOS builds and test suites pass in CI; Linux sanitizer checks and the Windows 1 GiB reference benchmark pass. See the [release process](RELEASE_PROCESS.md) for archive integrity and provenance verification.
 
 ## 1. What the tool will do
 
@@ -48,7 +48,7 @@ logview <file> [--format <name>] [--pattern <pattern>]
                [--max-line-bytes <n>] [--force]
 ```
 
-The default is batch text output and `raw` input. Format names are `raw`, `syslog3164`, `syslog5424`, `apache-common`, `apache-combined`, `nginx-combined`, `jsonl`, `custom`, and `auto`. Auto detection samples up to 32 complete lines or 256 KiB and falls back to raw if no format is confidently detected. `--pattern` requires `--format custom`. `--stats`, `--export`, and `--tui` choose distinct primary output modes in the 1.0 target. `--follow` cannot be combined with `--stats` or `--export` in 1.0. `--tui` needs an interactive terminal.
+The default is batch text output and `raw` input. Format names are `raw`, `syslog3164`, `syslog5424`, `apache-common`, `apache-combined`, `nginx-combined`, `jsonl`, `custom`, and `auto`. Auto detection samples up to 32 complete lines or 256 KiB and falls back to raw if no format is confidently detected. `--pattern` requires `--format custom`. `--stats`, `--export`, and `--tui` choose distinct primary output modes. `--follow` cannot be combined with `--stats` or `--export`. `--tui` needs an interactive terminal.
 
 ### Basic examples
 

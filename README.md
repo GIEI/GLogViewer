@@ -1,8 +1,8 @@
 # GLogViewer
 
-GLogViewer is a cross-platform, dependency-free C99 tool for exploring large structured log files from a command line or terminal interface. The executable is `logview`. The batch CLI supports raw and JSON Lines input, syslog RFC 3164/5424, Apache/Nginx access logs, custom patterns, format detection, compound filters, regex, text/CSV export, exact record/level counts, a timestamp timeline, estimated frequent field values, and follow mode with truncation and rotation detection. The TUI supports a bounded viewport, checkpoint-backed navigation and regex search across the full scan, source-line jumps, error/warning jumps, physical context lines, full-record zoom, filter edits, export of filtered/search-matched records, and live follow. The current public pre-release is [0.5.0-alpha.2](https://github.com/GIEI/GLogViewer/releases/tag/v0.5.0-alpha.2); see the [release notes](CHANGELOG.md) and [roadmap](docs/ROADMAP.md) for scope and remaining work to 1.0.
+GLogViewer is a cross-platform, dependency-free C99 tool for exploring large structured log files from a command line or terminal interface. The executable is `logview`. The batch CLI supports raw and JSON Lines input, syslog RFC 3164/5424, Apache/Nginx access logs, custom patterns, format detection, compound filters, regex, text/CSV export, exact record/level counts, a timestamp timeline, estimated frequent field values, and follow mode with truncation and rotation detection. The TUI supports a bounded viewport, checkpoint-backed navigation and regex search across the full scan, source-line jumps, error/warning jumps, physical context lines, full-record zoom, filter edits, export of filtered/search-matched records, and live follow. The current stable release is [1.0.0](https://github.com/GIEI/GLogViewer/releases/tag/v1.0.0); see the [release notes](CHANGELOG.md), [user manual](docs/USER_MANUAL.md), and [known limits](docs/TECHNICAL_SPECIFICATION.md).
 
-## Version 1.0 target
+## Version 1.0 features
 
 - Stream files larger than 1 GB with bounded application memory.
 - Parse RFC 3164-like and RFC 5424 syslog, Apache/Nginx access logs, JSON Lines plus pretty-printed JSON object arrays with nested fields, and custom placeholder patterns.
@@ -83,6 +83,6 @@ All repository content and every source comment must be written in English. See 
 
 ## Status and license
 
-Status: `0.5.0-alpha.2`; the Windows 1 GiB benchmark and automated Windows/Linux/macOS CI gates pass. The tagged prerelease flow has published and verified platform archives and SHA-256 checksums; stable release gates and broader hardening remain before 1.0. The existing [LICENSE](LICENSE) governs the repository.
+Status: `1.0.0`; Windows, Linux, and macOS release builds, tests, and package checks pass. Release archives include SHA-256 checksums and GitHub artifact attestations. The existing [LICENSE](LICENSE) governs the repository.
 
 See the [release process](docs/RELEASE_PROCESS.md) for the tag-based packaging workflow.

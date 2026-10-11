@@ -1,5 +1,24 @@
 # GLogViewer Changelog
 
+## 1.0.0
+
+First stable release.
+
+### Included
+
+- Cross-platform C99 CLI and terminal interface for streaming large local log files.
+- Raw text, JSON Lines and formatted JSON arrays, syslog RFC 3164/5424, Apache/NGINX access logs, and custom patterns.
+- Field predicates, bounded regular-expression matching, interactive navigation, search, source-line jump, full-record zoom, context, and follow mode.
+- Text/CSV export and record, level, timeline, and estimated frequent-value statistics.
+- Windows, Linux, and macOS release archives with SHA-256 checksums and signed GitHub build-provenance attestations.
+
+### Validation
+
+- Windows, Linux, and macOS builds, CLI suites, and release archive checks pass in GitHub Actions.
+- Linux AddressSanitizer and UndefinedBehaviorSanitizer checks pass.
+- The 1 GiB unfiltered Windows reference benchmark passes the five-second and 64 MiB RSS gates; see [validation notes](docs/VALIDATION.md).
+- Parser goldens cover syslog timestamps and structured data, Apache quoted fields, malformed records, and custom-pattern validation. Follow tests cover append, partial lines, truncation, rotation, and recovery after a temporarily missing rotated path.
+
 ## 0.5.0-alpha.2
 
 Release process validation pre-release.
