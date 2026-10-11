@@ -498,6 +498,52 @@ def main():
                 os.close(master_fd)
                 os.close(slave_fd)
 
+            navigation_file = root / "tui-search-navigation.jsonl"
+            navigation_file.write_bytes(b"".join(
+                ('{"message":"navigation record %05d"}\n' % number).encode("ascii")
+                for number in range(10000)
+            ))
+            navigation_master, navigation_slave = pty.openpty()
+            fcntl.ioctl(navigation_slave, termios.TIOCSWINSZ,
+                        struct.pack("HHHH", 24, 100, 0, 0))
+            navigation_process = subprocess.Popen(
+                [str(binary), str(navigation_file), "--format", "jsonl", "--tui"],
+                stdin=navigation_slave,
+                stdout=navigation_slave,
+                stderr=navigation_slave,
+                close_fds=True,
+            )
+            navigation_output = bytearray()
+            try:
+                def navigation_read_until(needle, timeout):
+                    deadline = time.monotonic() + timeout
+                    while needle not in navigation_output and \
+                            navigation_process.poll() is None and time.monotonic() < deadline:
+                        ready, _, _ = select.select([navigation_master], [], [], 0.1)
+                        if ready:
+                            try:
+                                navigation_output.extend(os.read(navigation_master, 65536))
+                            except OSError:
+                                break
+
+                navigation_read_until(b"Scan complete", 3)
+                os.write(navigation_master, b"/")
+                navigation_read_until(b"\033[24;1H\033[2K/", 2)
+                os.write(navigation_master, b"not-present\n\x1b")
+                navigation_read_until(b"Search cancelled", 3)
+                os.write(navigation_master, b"q")
+                navigation_process.wait(timeout=3)
+                require(navigation_process.returncode == 0 and
+                        b"Searching:" in navigation_output and
+                        b"Search cancelled" in navigation_output,
+                        "large TUI searches should remain responsive and cancellable")
+            finally:
+                if navigation_process.poll() is None:
+                    navigation_process.kill()
+                    navigation_process.wait(timeout=5)
+                os.close(navigation_master)
+                os.close(navigation_slave)
+
             (root / "tui_1.jsonl").write_text("existing export 1\n", encoding="utf-8")
             (root / "tui_2.jsonl").write_text("existing export 2\n", encoding="utf-8")
             tui_export = root / "tui_3.jsonl"

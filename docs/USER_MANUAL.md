@@ -158,6 +158,7 @@ logview app.log --format jsonl --tui
 | Home/End | Go to the first/last selected row in the scanned file. |
 | `/` | Enter a regex search. Press Enter to jump to its first match. |
 | Enter / Shift+Enter | Go to the next/previous search match. |
+| Esc during search navigation | Cancel a long search. Progress appears in the status line. |
 | `n` / `N` | Also go to the next/previous search match. |
 | `e` / `E` | Go to the next/previous error-level record. |
 | `w` / `W` | Go to the next/previous warning-level record. |

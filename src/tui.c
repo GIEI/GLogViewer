@@ -72,6 +72,12 @@ typedef struct {
     TuiRow rows[TUI_CACHE_ROWS];
     uint64_t total_rows;
     uint64_t cursor;
+    uint64_t search_navigation_sequence;
+    uint64_t search_navigation_total;
+    uint64_t search_navigation_checked;
+    int search_navigation_direction;
+    int search_navigation_active;
+    int search_navigation_progress;
     uint64_t physical_records;
     TuiContextRow context_rows[TUI_CONTEXT_RADIUS * 2 + 1];
     size_t context_count;
@@ -389,22 +395,79 @@ static int row_matches(const TuiState *state, const TuiRow *row)
            regex_search(state->search_regex, row->text, row->length) == REGEX_MATCH;
 }
 
-static void navigate_first_match(TuiState *state)
+static void start_search_navigation(TuiState *state, int direction,
+                                    int include_current)
 {
-    uint64_t sequence;
-    if (state->search_regex == NULL || state->total_rows == 0) return;
-    for (sequence = oldest_sequence(state); sequence < state->total_rows; sequence++) {
+    uint64_t oldest = oldest_sequence(state);
+    if (state->scanning) {
+        state->search_navigation_active = 0;
+        snprintf(state->status, sizeof(state->status),
+                 "Search navigation will start when scanning completes");
+        return;
+    }
+    if (state->search_regex == NULL || state->total_rows == 0) {
+        state->search_navigation_active = 0;
+        return;
+    }
+    state->search_navigation_total = state->total_rows - oldest;
+    state->search_navigation_checked = 0;
+    state->search_navigation_direction = direction < 0 ? -1 : 1;
+    state->search_navigation_progress = -1;
+    if (include_current) {
+        state->search_navigation_sequence = oldest;
+    } else if (direction < 0) {
+        state->search_navigation_sequence = state->cursor <= oldest ?
+            state->total_rows - 1 : state->cursor - 1;
+    } else {
+        state->search_navigation_sequence = state->cursor + 1 < state->total_rows ?
+            state->cursor + 1 : oldest;
+    }
+    state->search_navigation_active = 1;
+    snprintf(state->status, sizeof(state->status), "Searching: 0%% (Esc cancels)");
+}
+
+static int process_search_navigation(TuiState *state)
+{
+    unsigned int processed = 0;
+    const unsigned int batch_size = TUI_CACHE_ROWS;
+    int redraw = 0;
+    while (state->search_navigation_active && processed < batch_size) {
+        uint64_t oldest = oldest_sequence(state);
+        uint64_t sequence = state->search_navigation_sequence;
+        int progress;
         if (!ensure_sequence(state, sequence)) {
-            snprintf(state->status, sizeof(state->status), "Cannot load indexed records");
-            return;
+            state->search_navigation_active = 0;
+            snprintf(state->status, sizeof(state->status),
+                     "Cannot load records while searching");
+            return 1;
         }
         if (row_matches(state, row_at(state, sequence))) {
             state->cursor = sequence;
+            state->search_navigation_active = 0;
             state->status[0] = '\0';
-            return;
+            return 1;
+        }
+        state->search_navigation_checked++;
+        processed++;
+        sequence = state->search_navigation_direction < 0 ?
+            (sequence <= oldest ? state->total_rows - 1 : sequence - 1) :
+            (sequence + 1 < state->total_rows ? sequence + 1 : oldest);
+        state->search_navigation_sequence = sequence;
+        if (state->search_navigation_checked >= state->search_navigation_total) {
+            state->search_navigation_active = 0;
+            snprintf(state->status, sizeof(state->status), "No matching record");
+            return 1;
+        }
+        progress = (int)((state->search_navigation_checked * 100u) /
+                         state->search_navigation_total);
+        if (progress != state->search_navigation_progress) {
+            state->search_navigation_progress = progress;
+            snprintf(state->status, sizeof(state->status),
+                     "Searching: %d%% (Esc cancels)", progress);
+            redraw = 1;
         }
     }
-    snprintf(state->status, sizeof(state->status), "No matching record");
+    return redraw;
 }
 
 static int restart_scan(TuiState *state)
@@ -946,27 +1009,7 @@ static void render(TuiState *state)
 
 static void navigate_match(TuiState *state, int direction)
 {
-    uint64_t oldest = oldest_sequence(state);
-    uint64_t sequence = state->cursor;
-    if (state->search_regex == NULL || state->total_rows == 0) return;
-    for (;;) {
-        if (direction > 0) {
-            if (++sequence >= state->total_rows) sequence = oldest;
-        } else {
-            if (sequence <= oldest) sequence = state->total_rows - 1;
-            else sequence--;
-        }
-        if (!ensure_sequence(state, sequence)) {
-            snprintf(state->status, sizeof(state->status), "Cannot load indexed records");
-            return;
-        }
-        if (row_matches(state, row_at(state, sequence))) {
-            state->cursor = sequence;
-            state->status[0] = '\0';
-            return;
-        }
-        if (sequence == state->cursor) return;
-    }
+    start_search_navigation(state, direction, 0);
 }
 
 static void navigate_level(TuiState *state, unsigned char severity, int direction)
@@ -1015,6 +1058,7 @@ static int reset_indexes(TuiState *state)
     state->physical_records = 0;
     state->context_count = 0;
     state->context_visible = 0;
+    state->search_navigation_active = 0;
     return 1;
 }
 
@@ -1035,7 +1079,7 @@ static int prompt_search(TuiState *state)
     state->search_regex = replacement;
     strcpy(state->search_text, text);
     state->status[0] = '\0';
-    if (replacement != NULL) navigate_first_match(state);
+    if (replacement != NULL) start_search_navigation(state, 1, 1);
     else if (state->total_rows != 0) state->cursor = oldest_sequence(state);
     return 0;
 }
@@ -1229,6 +1273,10 @@ static int handle_key(TuiState *state, TerminalKey key, Filter **filter,
     } else if (key.type == TERMINAL_KEY_SHIFT_ENTER) {
         navigate_match(state, -1);
     }
+    if (key.type == TERMINAL_KEY_ESCAPE && state->search_navigation_active) {
+        state->search_navigation_active = 0;
+        snprintf(state->status, sizeof(state->status), "Search cancelled");
+    }
     if (key.type == TERMINAL_KEY_CHARACTER) {
         if (key.character == 'q') return 1;
         if (key.character == '?') state->help_visible = 1;
@@ -1236,6 +1284,7 @@ static int handle_key(TuiState *state, TerminalKey key, Filter **filter,
         else if (key.character == 'C') {
             int changed = state->search_regex != NULL || *filter != NULL ||
                           *raw_regex != NULL || *field_regex != NULL;
+            state->search_navigation_active = 0;
             regex_free(state->search_regex);
             state->search_regex = NULL;
             state->search_text[0] = '\0';
@@ -1313,10 +1362,12 @@ static int wait_for_follow(TuiState *state, int *should_quit)
     snprintf(state->status, sizeof(state->status), "Following file; press q to stop");
     render(state);
     while (!*should_quit && !logview_stop_requested) {
-        TerminalKey key = terminal_read_key(state->terminal, 250);
+        TerminalKey key = terminal_read_key(state->terminal,
+                                            state->search_navigation_active ? 0 : 250);
         int action = handle_key(state, key, state->field_filter,
                                 state->raw_regex, state->field_regex,
                                 state->regex_field_name);
+        int search_redraw;
         FollowResult follow_result;
         if (action == 1) {
             *should_quit = 1;
@@ -1326,7 +1377,9 @@ static int wait_for_follow(TuiState *state, int *should_quit)
             state->follow_waiting = 0;
             return 1;
         }
-        if (key.type != TERMINAL_KEY_NONE || terminal_size_changed(state)) render(state);
+        search_redraw = process_search_navigation(state);
+        if (key.type != TERMINAL_KEY_NONE || search_redraw ||
+            terminal_size_changed(state)) render(state);
         if (!reader_reposition(state->reader, state->follow_resume_offset,
                                state->follow_line_number_base)) return -1;
         follow_result = follow_poll(&state->input, state->follow_path,
@@ -1447,16 +1500,24 @@ int tui_run(FILE **input_file, LineReader *reader, InputFormat format,
             }
             state.scanning = 0;
             snprintf(state.status, sizeof(state.status), "Scan complete");
+            if (state.search_regex != NULL) {
+                start_search_navigation(&state, 1, 1);
+            }
             render(&state);
             while (!should_quit && !logview_stop_requested) {
-                TerminalKey key = terminal_read_key(state.terminal, 250);
+                TerminalKey key = terminal_read_key(
+                    state.terminal, state.search_navigation_active ? 0 : 250);
                 int action = handle_key(&state, key,
                                         field_filter, raw_regex, field_regex,
                                         regex_field_name);
+                int search_redraw;
                 if (action == 1) should_quit = 1;
                 else if (action == 2) break;
-                else if (key.type != TERMINAL_KEY_NONE) render(&state);
-                else if (terminal_size_changed(&state)) render(&state);
+                else {
+                    search_redraw = process_search_navigation(&state);
+                    if (key.type != TERMINAL_KEY_NONE || search_redraw ||
+                        terminal_size_changed(&state)) render(&state);
+                }
             }
             continue;
         }
@@ -1525,10 +1586,14 @@ int tui_run(FILE **input_file, LineReader *reader, InputFormat format,
             int action = handle_key(&state, key,
                                     field_filter, raw_regex, field_regex,
                                     regex_field_name);
+            int search_redraw;
             if (action == 1) should_quit = 1;
             else if (action == 2) render(&state);
-            else if (key.type != TERMINAL_KEY_NONE) render(&state);
-            else if (terminal_size_changed(&state)) render(&state);
+            else {
+                search_redraw = process_search_navigation(&state);
+                if (key.type != TERMINAL_KEY_NONE || search_redraw ||
+                    terminal_size_changed(&state)) render(&state);
+            }
         }
         if (state.scanning && (number & 65535u) == 0) {
             render_scan_progress(&state);
