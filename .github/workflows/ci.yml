@@ -51,6 +51,7 @@ jobs:
         run: >-
           python tests\benchmark_release.py build\logview.exe
           --build-details "GitHub Actions MSVC smoke test"
+          --hardware-details "GitHub-hosted Windows runner"
           --storage-details "GitHub-hosted temporary disk; smoke test only"
           --size-bytes 1048576 --runs 1
 
@@ -59,6 +60,7 @@ jobs:
         run: >-
           python3 tests/benchmark_release.py build/logview
           --build-details "GitHub Actions C compiler smoke test"
+          --hardware-details "GitHub-hosted runner"
           --storage-details "GitHub-hosted temporary disk; smoke test only"
           --size-bytes 1048576 --runs 1
 

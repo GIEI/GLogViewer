@@ -36,6 +36,11 @@ def parse_args():
         help="Input storage device and filesystem used for the benchmark",
     )
     parser.add_argument(
+        "--hardware-details",
+        required=True,
+        help="CPU model and installed memory of the benchmark machine",
+    )
+    parser.add_argument(
         "--runs", type=int, default=5,
         help="Number of measured warm-cache runs (release gate: 5)",
     )
@@ -66,6 +71,8 @@ def parse_args():
         parser.error("--build-details must not be empty")
     if not args.storage_details.strip():
         parser.error("--storage-details must not be empty")
+    if not args.hardware_details.strip():
+        parser.error("--hardware-details must not be empty")
     return args
 
 
@@ -214,6 +221,7 @@ def build_report(args, binary, version, fixture, fixture_size, warmup, runs):
         "machine": platform.machine(),
         "processor": platform.processor() or platform.uname().processor,
         "logical_cpu_count": os.cpu_count(),
+        "hardware_details": args.hardware_details,
         "storage_details": args.storage_details,
         "binary": str(args.binary.resolve()),
         "binary_sha256": get_binary_sha256(binary),
@@ -221,6 +229,9 @@ def build_report(args, binary, version, fixture, fixture_size, warmup, runs):
         "build_details": args.build_details,
         "input_path": str(fixture.resolve()),
         "input_size_bytes": fixture_size,
+        "fixture_record_size_bytes_including_lf": len(RECORD),
+        "fixture_full_record_count": fixture_size // len(RECORD),
+        "fixture_final_unterminated_bytes": fixture_size % len(RECORD),
         "warmup": warmup,
         "measured_runs": runs,
         "median_elapsed_seconds": median_seconds,

@@ -31,6 +31,7 @@ Build the release candidate from a clean checkout first, then record the actual 
 ```powershell
 python tests\benchmark_release.py build\logview.exe `
   --build-details "MSVC /O2 /std:c11" `
+  --hardware-details "AMD Ryzen 7 5800X, 32 GiB RAM" `
   --storage-details "J: NVMe SSD, NTFS" `
   --fixture-directory J:\GLogViewer-benchmark `
   --report build\release-benchmark-windows.json
