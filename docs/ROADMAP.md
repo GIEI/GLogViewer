@@ -1,6 +1,6 @@
 # Roadmap to Version 1.0
 
-**Status:** release plan, 2026-10-11. Version 1.0.0 is prepared for stable publication. All 1.0 acceptance gates have evidence: Windows, Linux, and macOS build/test/package CI, Linux sanitizers, parser and follow regressions, user-reported manual TUI checks on Windows/macOS, and the Windows 1 GiB benchmark. The release workflow generates SHA-256 checksums and signed GitHub build-provenance attestations. The latest main CI run [38154893862](https://github.com/GIEI/GLogViewer/actions/runs/38154893862) passed. See [validation notes](VALIDATION.md).
+**Status:** release plan, 2026-10-11. Version 1.0.0 is published as a stable GitHub release. All 1.0 acceptance gates have evidence: Windows, Linux, and macOS build/test/package CI, Linux sanitizers, parser and follow regressions, user-reported manual TUI checks on Windows/macOS, and the Windows 1 GiB benchmark. The tag workflow [38155296731](https://github.com/GIEI/GLogViewer/actions/runs/38155296731) passed and published platform archives with SHA-256 checksums and signed GitHub build-provenance attestations. See [validation notes](VALIDATION.md).
 
 ## Product decision
 
@@ -89,4 +89,4 @@ The 1.0 release requires:
 5. The README and manual describe the actual binary, installation, examples, known limits, and security behavior; documentation examples are executed in CI where practical.
 6. All written project content and all code comments satisfy the English-only policy.
 
-All gates are evidenced by CI run [38154893862](https://github.com/GIEI/GLogViewer/actions/runs/38154893862), the benchmark report in [validation notes](VALIDATION.md), and the user's recorded platform testing. The tagged workflow remains the final publication check. Native systemd/Windows event readers, multi-file merge, compression, multiline reconstruction, and automatic template discovery remain candidates for post-1.0 work unless separately approved and specified.
+All gates are evidenced by CI run [38154893862](https://github.com/GIEI/GLogViewer/actions/runs/38154893862), the tagged release run [38155296731](https://github.com/GIEI/GLogViewer/actions/runs/38155296731), the benchmark report in [validation notes](VALIDATION.md), and the user's recorded platform testing. Native systemd/Windows event readers, multi-file merge, compression, multiline reconstruction, and automatic template discovery remain candidates for post-1.0 work unless separately approved and specified.
