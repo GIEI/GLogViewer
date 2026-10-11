@@ -15,7 +15,7 @@ Common application fields worth preserving are timestamp, severity, message, ser
 
 ## 2. Version 1.0 scope
 
-“Must” means required before 1.0, not required in the first MVP. The current CLI also parses syslog, HTTP access logs, and custom patterns and supports compound filters; see the [roadmap](ROADMAP.md) for implementation stages.
+“Must” identifies features included in the 1.0 release. The first MVP was smaller; the [roadmap](ROADMAP.md) records how the implementation grew through each stage.
 
 | Feature | v1 priority | User value | Notes |
 | --- | --- | --- | --- |

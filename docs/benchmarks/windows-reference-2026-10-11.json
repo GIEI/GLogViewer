@@ -1,49 +1,50 @@
 {
   "benchmark": "glogviewer-plain-raw-warm-cache-v1",
-  "binary_sha256": "0bbff576a97c261ff252e4cd3ea3115acf788fdf46adf58591b16d96b9a3e8f1",
-  "build_details": "MSVC /O2 /std:c11 via build.bat",
+  "binary_sha256": "a9b97c75f144aa7617bf016544891ebee80d5d8d1f7a8893f0cc5142d8911514",
+  "build_details": "MSVC optimized Windows build",
   "fixture_final_unterminated_bytes": 13,
   "fixture_full_record_count": 21053761,
   "fixture_record_size_bytes_including_lf": 51,
   "input_size_bytes": 1073741824,
   "measured_runs": [
     {
-      "elapsed_seconds": 0.6794886999996379,
-      "peak_rss_bytes": 4341760
+      "elapsed_seconds": 0.7723065999998653,
+      "peak_rss_bytes": 4345856
     },
     {
-      "elapsed_seconds": 0.6759719999972731,
-      "peak_rss_bytes": 4341760
+      "elapsed_seconds": 0.7550192000016978,
+      "peak_rss_bytes": 4345856
     },
     {
-      "elapsed_seconds": 0.6822049999973387,
-      "peak_rss_bytes": 4341760
+      "elapsed_seconds": 0.7648109000001568,
+      "peak_rss_bytes": 4345856
     },
     {
-      "elapsed_seconds": 0.6753352999985509,
-      "peak_rss_bytes": 4337664
+      "elapsed_seconds": 0.7690798999974504,
+      "peak_rss_bytes": 4345856
     },
     {
-      "elapsed_seconds": 0.6787083999988681,
-      "peak_rss_bytes": 4341760
+      "elapsed_seconds": 0.7643209999987448,
+      "peak_rss_bytes": 4345856
     }
   ],
-  "median_elapsed_seconds": 0.6787083999988681,
+  "median_elapsed_seconds": 0.7648109000001568,
   "output_destination": "stdout redirected to the null device",
-  "peak_rss_bytes": 4341760,
+  "peak_rss_bytes": 4345856,
   "procedure": "One full warmup scan followed by sequential measured scans.",
-  "source_revision": "17681d5b9e230e3b5435ba9ced0d740cf1c980f1",
+  "source_revision": "186cf1ae5c193abb28f19070c9187d243ca681de",
   "source_tree_clean": true,
+  "storage_details": "NVMe volume with NTFS",
   "targets": {
     "median_under_5_seconds": true,
     "peak_rss_under_64_mib": true,
     "rss_note": "Peak resident set size is a conservative proxy for the 64 MiB application-heap target; it includes runtime and stack memory."
   },
-  "throughput_gib_per_second": 1.4733868035251483,
-  "timestamp_utc": "2026-10-11T17:48:53.798627+02:00",
-  "version": "logview 0.5.0-alpha.1",
+  "throughput_gib_per_second": 1.3075127459608578,
+  "timestamp_utc": "2026-10-11T16:22:07.811624+00:00",
+  "version": "logview 1.0.0",
   "warmup": {
-    "elapsed_seconds": 0.691985500001465,
-    "peak_rss_bytes": 4341760
+    "elapsed_seconds": 0.7638508999989426,
+    "peak_rss_bytes": 4345856
   }
 }
