@@ -787,7 +787,7 @@ int main(int argc, char **argv)
                 result_code = 2;
                 goto cleanup;
             }
-            if (options.follow_mode && fflush(output.stream) != 0) {
+            if (options.follow_mode && !output_flush(&output)) {
                 print_io_error("cannot flush", "standard output");
                 result_code = 2;
                 goto cleanup;

@@ -67,6 +67,21 @@ def check_reader_boundaries(binary, root):
         require(result.returncode == 0 and result.stdout == expected,
                 "reader should preserve empty records and normalize CR only before LF")
 
+    output_buffer_file = root / "output-buffer.log"
+    output_records = [
+        ("row-{:04d}-".format(index).encode("ascii") + b"x" * 150 + b"\n")
+        for index in range(5000)
+    ]
+    large_output_record = b"L" * (300 * 1024) + b"\n"
+    expected_output = b"".join(output_records) + large_output_record
+    output_buffer_file.write_bytes(expected_output)
+    buffered_output = run(binary, str(output_buffer_file),
+                          "--max-line-bytes", "400000")
+    require(buffered_output.returncode == 0 and
+            buffered_output.stdout == expected_output and
+            buffered_output.stderr == b"",
+            "buffered text output should preserve records across flush and direct-write boundaries")
+
 
 def main():
     binary = Path(sys.argv[1]).resolve()

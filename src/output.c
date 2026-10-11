@@ -20,6 +20,47 @@
 #include <unistd.h>
 #endif
 
+#define LOGVIEW_TEXT_OUTPUT_BUFFER_SIZE (256u * 1024u)
+
+static int flush_text_buffer(OutputSink *sink)
+{
+    size_t written;
+    if (sink->text_buffer_length == 0) return 1;
+    written = fwrite(sink->text_buffer, 1, sink->text_buffer_length,
+                     sink->stream);
+    if (written != sink->text_buffer_length) {
+        size_t remaining = sink->text_buffer_length - written;
+        if (written != 0) {
+            memmove(sink->text_buffer, sink->text_buffer + written, remaining);
+        }
+        sink->text_buffer_length = remaining;
+        return 0;
+    }
+    sink->text_buffer_length = 0;
+    return 1;
+}
+
+static int allocate_text_buffer(OutputSink *sink, char *error,
+                                size_t error_capacity)
+{
+    if (sink->format != OUTPUT_TEXT) return 1;
+    sink->text_buffer = (unsigned char *)malloc(LOGVIEW_TEXT_OUTPUT_BUFFER_SIZE);
+    if (sink->text_buffer == NULL) {
+        snprintf(error, error_capacity, "cannot allocate text output buffer");
+        return 0;
+    }
+    sink->text_buffer_capacity = LOGVIEW_TEXT_OUTPUT_BUFFER_SIZE;
+    return 1;
+}
+
+static void release_text_buffer(OutputSink *sink)
+{
+    free(sink->text_buffer);
+    sink->text_buffer = NULL;
+    sink->text_buffer_length = 0;
+    sink->text_buffer_capacity = 0;
+}
+
 static int valid_name(const char *name, size_t length)
 {
     size_t index;
@@ -182,13 +223,20 @@ int output_init(OutputSink *sink, const char *path, const char *input_path,
     sink->format = format;
     if (format == OUTPUT_CSV && !parse_columns(sink, columns, error, error_capacity)) return 0;
     if (path == NULL) {
+        if (!allocate_text_buffer(sink, error, error_capacity)) return 0;
         sink->stream = stdout;
-        return write_header(sink);
+        if (!write_header(sink)) {
+            release_text_buffer(sink);
+            snprintf(error, error_capacity, "cannot write output header");
+            return 0;
+        }
+        return 1;
     }
     if (same_file(path, input_path)) {
         snprintf(error, error_capacity, "output path refers to the input file");
         return 0;
     }
+    if (!allocate_text_buffer(sink, error, error_capacity)) return 0;
 #ifdef _WIN32
     {
         int flags = _O_WRONLY | _O_CREAT | _O_BINARY | (force ? _O_TRUNC : _O_EXCL);
@@ -196,6 +244,7 @@ int output_init(OutputSink *sink, const char *path, const char *input_path,
         if (descriptor >= 0) sink->stream = _fdopen(descriptor, "wb");
         if (descriptor < 0 || sink->stream == NULL) {
             if (descriptor >= 0) _close(descriptor);
+            release_text_buffer(sink);
             snprintf(error, error_capacity, "cannot create output file: %s", strerror(errno));
             return 0;
         }
@@ -207,6 +256,7 @@ int output_init(OutputSink *sink, const char *path, const char *input_path,
         if (descriptor >= 0) sink->stream = fdopen(descriptor, "wb");
         if (descriptor < 0 || sink->stream == NULL) {
             if (descriptor >= 0) close(descriptor);
+            release_text_buffer(sink);
             snprintf(error, error_capacity, "cannot create output file: %s", strerror(errno));
             return 0;
         }
@@ -245,18 +295,42 @@ static int write_entry_csv(OutputSink *sink, const LogEntry *entry)
 
 int output_write(OutputSink *sink, const LogEntry *entry)
 {
+    size_t required;
+    if (sink->stream == NULL) return 0;
     if (sink->format == OUTPUT_CSV) return write_entry_csv(sink, entry);
-    if (entry->raw.length != 0 &&
-        fwrite(entry->raw.data, 1, entry->raw.length, sink->stream) != entry->raw.length) return 0;
-    return fputc('\n', sink->stream) != EOF;
+    if (sink->text_buffer == NULL || entry->raw.length == (size_t)-1) return 0;
+    required = entry->raw.length + 1;
+    if (required > sink->text_buffer_capacity) {
+        if (!flush_text_buffer(sink)) return 0;
+        if (entry->raw.length != 0 &&
+            fwrite(entry->raw.data, 1, entry->raw.length, sink->stream) != entry->raw.length) return 0;
+        return fputc('\n', sink->stream) != EOF;
+    }
+    if (required > sink->text_buffer_capacity - sink->text_buffer_length &&
+        !flush_text_buffer(sink)) return 0;
+    if (entry->raw.length != 0) {
+        memcpy(sink->text_buffer + sink->text_buffer_length,
+               entry->raw.data, entry->raw.length);
+    }
+    sink->text_buffer[sink->text_buffer_length + entry->raw.length] = '\n';
+    sink->text_buffer_length += required;
+    return 1;
+}
+
+int output_flush(OutputSink *sink)
+{
+    if (sink->stream == NULL || !flush_text_buffer(sink)) return 0;
+    return fflush(sink->stream) == 0;
 }
 
 int output_finish(OutputSink *sink)
 {
     int result = 1;
+    if (sink->stream != NULL && !flush_text_buffer(sink)) result = 0;
     if (sink->stream != NULL && fflush(sink->stream) != 0) result = 0;
     if (sink->owns_stream && sink->stream != NULL && fclose(sink->stream) != 0) result = 0;
     sink->stream = NULL;
     sink->owns_stream = 0;
+    release_text_buffer(sink);
     return result;
 }

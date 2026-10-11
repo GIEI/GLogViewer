@@ -3,6 +3,7 @@
 import argparse
 import ctypes
 import datetime
+import hashlib
 import json
 import os
 import platform
@@ -45,6 +46,12 @@ def parse_args():
     parser.add_argument(
         "--report", type=Path,
         help="Optional path for a JSON report",
+    )
+    parser.add_argument(
+        "--fixture-directory",
+        type=Path,
+        default=Path("build") / "release-benchmark",
+        help="Directory on the volume used for the generated input fixture",
     )
     parser.add_argument(
         "--keep-fixture", action="store_true",
@@ -164,6 +171,30 @@ def get_binary_version(binary):
     return version
 
 
+def get_source_state():
+    root = Path(__file__).resolve().parents[1]
+    revision = subprocess.run(
+        ["git", "rev-parse", "HEAD"], cwd=root, stdout=subprocess.PIPE,
+        stderr=subprocess.DEVNULL, check=False,
+    )
+    if revision.returncode != 0:
+        return None, None
+    status = subprocess.run(
+        ["git", "status", "--porcelain"], cwd=root, stdout=subprocess.PIPE,
+        stderr=subprocess.DEVNULL, check=False,
+    )
+    clean = status.returncode == 0 and not status.stdout
+    return revision.stdout.decode("ascii", errors="replace").strip(), clean
+
+
+def get_binary_sha256(binary):
+    digest = hashlib.sha256()
+    with binary.open("rb") as executable:
+        for block in iter(lambda: executable.read(1024 * 1024), b""):
+            digest.update(block)
+    return digest.hexdigest()
+
+
 def build_report(args, binary, version, fixture, fixture_size, warmup, runs):
     median_seconds = statistics.median(
         item["elapsed_seconds"] for item in runs
@@ -185,6 +216,7 @@ def build_report(args, binary, version, fixture, fixture_size, warmup, runs):
         "logical_cpu_count": os.cpu_count(),
         "storage_details": args.storage_details,
         "binary": str(args.binary.resolve()),
+        "binary_sha256": get_binary_sha256(binary),
         "version": version,
         "build_details": args.build_details,
         "input_path": str(fixture.resolve()),
@@ -216,7 +248,7 @@ def main():
         raise SystemExit("Executable not found: " + str(binary))
     version = get_binary_version(binary)
 
-    fixture_root = Path("build") / "release-benchmark"
+    fixture_root = args.fixture_directory
     fixture_root.mkdir(parents=True, exist_ok=True)
     if args.keep_fixture:
         fixture = fixture_root / "fixture-{}-bytes.log".format(args.size_bytes)
@@ -249,7 +281,9 @@ def run_benchmark(args, binary, version, fixture, fixture_size):
     for index in range(args.runs):
         print("Measured scan {}/{}".format(index + 1, args.runs), file=sys.stderr)
         runs.append(scan_once(binary, fixture))
-    return build_report(args, binary, version, fixture, fixture_size, warmup, runs)
+    report = build_report(args, binary, version, fixture, fixture_size, warmup, runs)
+    report["source_revision"], report["source_tree_clean"] = get_source_state()
+    return report
 
 
 if __name__ == "__main__":

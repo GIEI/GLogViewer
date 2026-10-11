@@ -32,10 +32,11 @@ Build the release candidate from a clean checkout first, then record the actual 
 python tests\benchmark_release.py build\logview.exe `
   --build-details "MSVC /O2 /std:c11" `
   --storage-details "J: NVMe SSD, NTFS" `
+  --fixture-directory J:\GLogViewer-benchmark `
   --report build\release-benchmark-windows.json
 ```
 
-On macOS or Linux, pass `build/logview` and describe the compiler flags and input volume in the same way. The default run is the release gate. Smaller `--size-bytes` values are useful only for checking the harness and do not count as benchmark evidence. Save the report with the release validation records and include the full generated input size in any comparison.
+`--fixture-directory` places the generated input on the volume being measured, even when the checkout and executable are on another drive. On macOS or Linux, pass `build/logview` and describe the compiler flags and input volume in the same way. The default run is the release gate. Smaller `--size-bytes` values are useful only for checking the harness and do not count as benchmark evidence. Save the report with the release validation records and include the full generated input size in any comparison.
 
 ## Windows CLI validation
 
@@ -68,4 +69,4 @@ Running `--stats` on this sample reported 2,220,000 physical records, 2,219,778 
 
 ## Platform coverage
 
-The CLI suite and large-sample scans have passed on the user's Linux machine with GCC and no compiler warnings. The expanded POSIX suite also passed, covering follow rotation/Ctrl-C behavior and the TUI PTY scenarios. The Windows build and CLI suite pass with MSVC. The user also reported `make clean && make test` passing on macOS with an Apple M5 and 16 GB RAM; all eight available sample files were scanned. GitHub Actions run [38151419386](https://github.com/GIEI/GLogViewer/actions/runs/38151419386) passed clean builds and CLI tests on Windows, Linux, and macOS. Run [38151709262](https://github.com/GIEI/GLogViewer/actions/runs/38151709262) also passed the benchmark harness smoke test on all three platforms. The workflow uses fixed `windows-2025`, `ubuntu-24.04`, and `macos-15` runner images. The sample's `Linux_` filename describes its log content, not the operating system used to run the Windows checks.
+The CLI suite and large-sample scans have passed on the user's Linux machine with GCC and no compiler warnings. The expanded POSIX suite also passed, covering follow rotation/Ctrl-C behavior and the TUI PTY scenarios. The Windows build and CLI suite pass with MSVC. The user also reported `make clean && make test` passing on macOS with an Apple M5 and 16 GB RAM; all eight available sample files were scanned. GitHub Actions run [38151419386](https://github.com/GIEI/GLogViewer/actions/runs/38151419386) passed clean builds and CLI tests on Windows, Linux, and macOS. Runs [38151709262](https://github.com/GIEI/GLogViewer/actions/runs/38151709262) and [38151810909](https://github.com/GIEI/GLogViewer/actions/runs/38151810909) passed the benchmark harness smoke test on all three platforms. Run [38151899774](https://github.com/GIEI/GLogViewer/actions/runs/38151899774) passed the platform matrix, benchmark smoke tests, and the full CLI suite under AddressSanitizer and UndefinedBehaviorSanitizer on Ubuntu. The workflow uses fixed `windows-2025`, `ubuntu-24.04`, and `macos-15` runner images. The sample's `Linux_` filename describes its log content, not the operating system used to run the Windows checks.

@@ -15,6 +15,9 @@ typedef enum {
 
 typedef struct {
     FILE *stream;
+    unsigned char *text_buffer;
+    size_t text_buffer_length;
+    size_t text_buffer_capacity;
     int owns_stream;
     OutputFormat format;
     char columns[LOGVIEW_MAX_COLUMNS][LOGVIEW_COLUMN_NAME];
@@ -25,6 +28,7 @@ int output_init(OutputSink *sink, const char *path, const char *input_path,
                 OutputFormat format, const char *columns, int force,
                 char *error, size_t error_capacity);
 int output_write(OutputSink *sink, const LogEntry *entry);
+int output_flush(OutputSink *sink);
 int output_finish(OutputSink *sink);
 
 #endif
