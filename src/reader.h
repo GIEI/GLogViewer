@@ -14,6 +14,10 @@ typedef enum {
     READER_ERROR
 } ReaderResult;
 
+typedef int (*ReaderPhysicalLineCallback)(void *context,
+                                          uint64_t line_number,
+                                          uint64_t byte_offset);
+
 typedef struct {
     FILE *file;
     unsigned char *line;
@@ -28,6 +32,29 @@ typedef struct {
     int input_eof;
     int input_error;
     int line_terminated;
+    unsigned char *json_record;
+    size_t json_record_capacity;
+    size_t json_record_length;
+    const unsigned char *json_pending_line;
+    size_t json_pending_length;
+    size_t json_pending_position;
+    uint64_t json_pending_number;
+    uint64_t json_pending_offset;
+    ReaderResult json_pending_result;
+    int json_pending_terminated;
+    int json_pending;
+    int json_mode_checked;
+    int json_document_mode;
+    int json_document_hint;
+    int json_active;
+    int json_in_string;
+    int json_escape;
+    int json_outside_string;
+    int json_outside_escape;
+    int json_oversized;
+    size_t json_depth;
+    uint64_t json_record_line;
+    uint64_t json_record_offset;
 } LineReader;
 
 int reader_init(LineReader *reader, FILE *file, size_t max_line_bytes);
@@ -37,5 +64,10 @@ int reader_reposition(LineReader *reader, uint64_t offset,
 ReaderResult reader_next(LineReader *reader, const unsigned char **line,
                          size_t *line_length, uint64_t *line_number,
                          uint64_t *byte_offset);
+ReaderResult reader_next_json(LineReader *reader, const unsigned char **record,
+                              size_t *record_length, uint64_t *line_number,
+                              uint64_t *byte_offset,
+                              ReaderPhysicalLineCallback callback,
+                              void *callback_context);
 
 #endif

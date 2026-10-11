@@ -3,13 +3,15 @@
 #include <stdlib.h>
 #include <string.h>
 
+#define JSON_MAX_DEPTH 64
+#define JSON_PATH_CAPACITY 512
+#define JSON_SCRATCH_EXTRA 65536u
+
 typedef struct {
     const unsigned char *data;
     size_t length;
     size_t position;
     JsonScratch *scratch;
-    size_t key_count;
-    ByteSpan seen_keys[LOGVIEW_MAX_FIELDS];
 } JsonParser;
 
 static int field_name_equal(ByteSpan name, const char *text)
@@ -74,12 +76,15 @@ static int utf8_valid(const unsigned char *data, size_t length)
 
 int json_scratch_init(JsonScratch *scratch, size_t capacity)
 {
+    size_t allocation_capacity;
     memset(scratch, 0, sizeof(*scratch));
-    scratch->data = (unsigned char *)malloc(capacity);
+    if (capacity > SIZE_MAX - JSON_SCRATCH_EXTRA) return 0;
+    allocation_capacity = capacity + JSON_SCRATCH_EXTRA;
+    scratch->data = (unsigned char *)malloc(allocation_capacity);
     if (scratch->data == NULL) {
         return 0;
     }
-    scratch->capacity = capacity;
+    scratch->capacity = allocation_capacity;
     return 1;
 }
 
@@ -93,7 +98,7 @@ static void skip_whitespace(JsonParser *parser)
 {
     while (parser->position < parser->length) {
         unsigned char byte = parser->data[parser->position];
-        if (byte != ' ' && byte != '\t' && byte != '\r') {
+        if (byte != ' ' && byte != '\t' && byte != '\r' && byte != '\n') {
             break;
         }
         parser->position++;
@@ -392,89 +397,195 @@ static int parse_value(JsonParser *parser, ByteSpan *value, int *is_null)
     return 0;
 }
 
+static int path_name_equal(const unsigned char *left, size_t left_length,
+                           const unsigned char *right, size_t right_length)
+{
+    return left_length == right_length &&
+           memcmp(left, right, left_length) == 0;
+}
+
+static int entry_has_field_name(const LogEntry *entry, const unsigned char *name,
+                                size_t name_length)
+{
+    size_t index;
+    for (index = 0; index < entry->field_count; index++) {
+        if (path_name_equal(entry->fields[index].name.data,
+                            entry->fields[index].name.length,
+                            name, name_length)) return 1;
+    }
+    return 0;
+}
+
+static int save_field(JsonParser *parser, LogEntry *entry,
+                      const unsigned char *path, size_t path_length,
+                      int path_valid, ByteSpan leaf, ByteSpan value,
+                      int is_null)
+{
+    ByteSpan stored_path;
+    size_t index;
+    if (is_null) return 1;
+    if (path_valid && path_length != 0 &&
+        !entry_has_field_name(entry, path, path_length) &&
+        entry->field_count < LOGVIEW_MAX_FIELDS) {
+        size_t path_start = parser->scratch->length;
+        if (path_length > parser->scratch->capacity - path_start) return 0;
+        memcpy(parser->scratch->data + path_start, path, path_length);
+        parser->scratch->length += path_length;
+        stored_path.data = parser->scratch->data + path_start;
+        stored_path.length = path_length;
+        entry->fields[entry->field_count].name = stored_path;
+        entry->fields[entry->field_count].value = value;
+        entry->field_count++;
+    }
+    if (!field_name_valid(leaf) ||
+        entry_has_field_name(entry, leaf.data, leaf.length) ||
+        entry->field_count >= LOGVIEW_MAX_FIELDS) return 1;
+    for (index = 0; index < leaf.length; index++) {
+        if (!scratch_byte(parser, leaf.data[index])) return 0;
+    }
+    stored_path.data = parser->scratch->data + parser->scratch->length - leaf.length;
+    stored_path.length = leaf.length;
+    entry->fields[entry->field_count].name = stored_path;
+    entry->fields[entry->field_count].value = value;
+    entry->field_count++;
+    return 1;
+}
+
+static int build_child_path(const unsigned char *parent, size_t parent_length,
+                            int parent_valid, ByteSpan key,
+                            unsigned char *child, size_t *child_length)
+{
+    size_t required;
+    if (!parent_valid || !field_name_valid(key)) return 0;
+    required = parent_length + (parent_length != 0 ? 1u : 0u) + key.length;
+    if (required >= JSON_PATH_CAPACITY) return 0;
+    if (parent_length != 0) {
+        memcpy(child, parent, parent_length);
+        child[parent_length] = '.';
+    }
+    memcpy(child + parent_length + (parent_length != 0 ? 1u : 0u),
+           key.data, key.length);
+    *child_length = required;
+    return 1;
+}
+
+static int parse_nested_value(JsonParser *parser, LogEntry *entry,
+                              const unsigned char *path, size_t path_length,
+                              int path_valid, ByteSpan leaf, unsigned int depth);
+
+static int parse_json_object(JsonParser *parser, LogEntry *entry,
+                             const unsigned char *path, size_t path_length,
+                             int path_valid, unsigned int depth)
+{
+    ByteSpan seen[LOGVIEW_MAX_FIELDS];
+    size_t seen_count = 0;
+    if (depth > JSON_MAX_DEPTH || parser->position >= parser->length ||
+        parser->data[parser->position++] != '{') return 0;
+    skip_whitespace(parser);
+    if (parser->position < parser->length && parser->data[parser->position] == '}') {
+        parser->position++;
+        return 1;
+    }
+    for (;;) {
+        ByteSpan key;
+        unsigned char child_path[JSON_PATH_CAPACITY];
+        size_t child_path_length = 0;
+        int child_path_valid;
+        size_t index;
+        if (seen_count >= LOGVIEW_MAX_FIELDS ||
+            !parse_json_string(parser, &key)) return 0;
+        for (index = 0; index < seen_count; index++) {
+            if (seen[index].length == key.length &&
+                memcmp(seen[index].data, key.data, key.length) == 0) return 0;
+        }
+        seen[seen_count++] = key;
+        skip_whitespace(parser);
+        if (parser->position >= parser->length || parser->data[parser->position++] != ':') {
+            return 0;
+        }
+        child_path_valid = build_child_path(path, path_length, path_valid,
+                                            key, child_path,
+                                            &child_path_length);
+        if (!parse_nested_value(parser, entry, child_path, child_path_length,
+                                child_path_valid, key, depth + 1)) return 0;
+        skip_whitespace(parser);
+        if (parser->position >= parser->length) return 0;
+        if (parser->data[parser->position] == '}') {
+            parser->position++;
+            return 1;
+        }
+        if (parser->data[parser->position++] != ',') return 0;
+        skip_whitespace(parser);
+    }
+}
+
+static int parse_json_array(JsonParser *parser, LogEntry *entry,
+                            const unsigned char *path, size_t path_length,
+                            int path_valid, unsigned int depth)
+{
+    if (depth > JSON_MAX_DEPTH || parser->position >= parser->length ||
+        parser->data[parser->position++] != '[') return 0;
+    skip_whitespace(parser);
+    if (parser->position < parser->length && parser->data[parser->position] == ']') {
+        parser->position++;
+        return 1;
+    }
+    for (;;) {
+        if (!parse_nested_value(parser, entry, path, path_length, path_valid,
+                                (ByteSpan){NULL, 0}, depth + 1)) return 0;
+        skip_whitespace(parser);
+        if (parser->position >= parser->length) return 0;
+        if (parser->data[parser->position] == ']') {
+            parser->position++;
+            return 1;
+        }
+        if (parser->data[parser->position++] != ',') return 0;
+        skip_whitespace(parser);
+    }
+}
+
+static int parse_nested_value(JsonParser *parser, LogEntry *entry,
+                              const unsigned char *path, size_t path_length,
+                              int path_valid, ByteSpan leaf, unsigned int depth)
+{
+    ByteSpan value;
+    int is_null = 0;
+    skip_whitespace(parser);
+    if (parser->position >= parser->length || depth > JSON_MAX_DEPTH) return 0;
+    if (parser->data[parser->position] == '{') {
+        return parse_json_object(parser, entry, path, path_length,
+                                 path_valid, depth);
+    }
+    if (parser->data[parser->position] == '[') {
+        return parse_json_array(parser, entry, path, path_length,
+                                path_valid, depth);
+    }
+    if (!parse_value(parser, &value, &is_null)) return 0;
+    if (leaf.data == NULL) return 1;
+    return save_field(parser, entry, path, path_length, path_valid,
+                      leaf, value, is_null);
+}
+
 int jsonl_parse(LogEntry *entry, JsonScratch *scratch)
 {
     JsonParser parser;
-    size_t index;
-    int have_field;
-
+    unsigned char root_path[JSON_PATH_CAPACITY];
     entry->field_count = 0;
     entry->parse_ok = 0;
     scratch->length = 0;
+    root_path[0] = '\0';
     if (entry->raw.length == 0 ||
-        !utf8_valid(entry->raw.data, entry->raw.length)) {
-        return 0;
-    }
-
+        !utf8_valid(entry->raw.data, entry->raw.length)) return 0;
     memset(&parser, 0, sizeof(parser));
     parser.data = entry->raw.data;
     parser.length = entry->raw.length;
     parser.scratch = scratch;
     skip_whitespace(&parser);
-    if (parser.position >= parser.length ||
-        parser.data[parser.position++] != '{') {
-        return 0;
-    }
+    if (parser.position >= parser.length || parser.data[parser.position] != '{' ||
+        !parse_json_object(&parser, entry, root_path, 0, 1, 0)) return 0;
     skip_whitespace(&parser);
-    if (parser.position < parser.length &&
-        parser.data[parser.position] == '}') {
-        parser.position++;
-        skip_whitespace(&parser);
-        entry->parse_ok = parser.position == parser.length;
-        return entry->parse_ok;
-    }
-
-    for (;;) {
-        ByteSpan name;
-        ByteSpan value;
-        int is_null;
-        if (parser.key_count >= LOGVIEW_MAX_FIELDS ||
-            !parse_json_string(&parser, &name)) {
-            return 0;
-        }
-        for (index = 0; index < parser.key_count; index++) {
-            if (parser.seen_keys[index].length == name.length &&
-                memcmp(parser.seen_keys[index].data, name.data, name.length) == 0) {
-                return 0;
-            }
-        }
-        parser.seen_keys[parser.key_count++] = name;
-        skip_whitespace(&parser);
-        if (parser.position >= parser.length ||
-            parser.data[parser.position++] != ':') {
-            return 0;
-        }
-        if (!parse_value(&parser, &value, &is_null)) {
-            return 0;
-        }
-
-        if (!is_null && field_name_valid(name)) {
-            if (entry->field_count >= LOGVIEW_MAX_FIELDS) {
-                return 0;
-            }
-            entry->fields[entry->field_count].name = name;
-            entry->fields[entry->field_count].value = value;
-            entry->field_count++;
-        }
-
-        skip_whitespace(&parser);
-        if (parser.position >= parser.length) {
-            return 0;
-        }
-        if (parser.data[parser.position] == '}') {
-            parser.position++;
-            break;
-        }
-        if (parser.data[parser.position++] != ',') {
-            return 0;
-        }
-        skip_whitespace(&parser);
-    }
-
-    skip_whitespace(&parser);
-    have_field = parser.position == parser.length;
-    entry->parse_ok = have_field;
-    return have_field;
+    entry->parse_ok = parser.position == parser.length;
+    return entry->parse_ok;
 }
 
 static int find_exact_field(const LogEntry *entry, const char *name,

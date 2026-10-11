@@ -28,8 +28,11 @@ static int valid_name(const char *name, size_t length)
           (name[0] >= 'a' && name[0] <= 'z') || name[0] == '_')) return 0;
     for (index = 1; index < length; index++) {
         unsigned char byte = (unsigned char)name[index];
-        if (!((byte >= 'A' && byte <= 'Z') || (byte >= 'a' && byte <= 'z') ||
-              (byte >= '0' && byte <= '9') || byte == '_')) return 0;
+        if (byte == '.') {
+            if (name[index - 1] == '.' || index + 1 == length) return 0;
+        } else if (!((byte >= 'A' && byte <= 'Z') ||
+                     (byte >= 'a' && byte <= 'z') ||
+                     (byte >= '0' && byte <= '9') || byte == '_')) return 0;
     }
     return 1;
 }

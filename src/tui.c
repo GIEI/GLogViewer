@@ -5,9 +5,11 @@
 #include "tui.h"
 
 #include "follow.h"
+#include "output.h"
 #include "terminal.h"
 
 #include <ctype.h>
+#include <errno.h>
 #include <stdio.h>
 #include <signal.h>
 #include <stdlib.h>
@@ -65,7 +67,7 @@ typedef struct {
     JsonScratch *scratch;
     Filter **field_filter;
     Regex **raw_regex;
-    Regex *field_regex;
+    Regex **field_regex;
     const char *regex_field_name;
     TuiRow rows[TUI_CACHE_ROWS];
     uint64_t total_rows;
@@ -90,7 +92,10 @@ typedef struct {
     uint64_t follow_resume_offset;
     uint64_t follow_line_number_base;
     const char *follow_path;
+    const char *input_path;
 } TuiState;
+
+static int reset_indexes(TuiState *state);
 
 static int tui_seek(FILE *file, uint64_t offset)
 {
@@ -139,6 +144,13 @@ static int add_physical_checkpoint(TuiState *state, uint64_t line_number,
     checkpoint.byte_offset = byte_offset;
     return fwrite(&checkpoint, sizeof(checkpoint), 1,
                   state->physical_index_file) == 1;
+}
+
+static int index_physical_line(void *context, uint64_t line_number,
+                               uint64_t byte_offset)
+{
+    return add_physical_checkpoint((TuiState *)context, line_number,
+                                   byte_offset);
 }
 
 static int parse_record(InputFormat format, const char *custom_pattern,
@@ -290,8 +302,10 @@ static int load_window(TuiState *state, uint64_t first, uint64_t count)
         size_t length;
         uint64_t number;
         uint64_t offset;
-        ReaderResult result = reader_next(state->reader, &line, &length,
-                                          &number, &offset);
+        ReaderResult result = state->format == FORMAT_JSONL ?
+            reader_next_json(state->reader, &line, &length, &number, &offset,
+                             NULL, NULL) :
+            reader_next(state->reader, &line, &length, &number, &offset);
         if (result == READER_EOF || result == READER_ERROR) return 0;
         if (result != READER_LINE) continue;
         {
@@ -300,7 +314,7 @@ static int load_window(TuiState *state, uint64_t first, uint64_t count)
             if (!parse_record(state->format, state->custom_pattern, state->scratch,
                               line, length, number, offset, &entry)) continue;
             selected = record_selected(&entry, line, length, *state->field_filter,
-                                        *state->raw_regex, state->field_regex,
+                                        *state->raw_regex, *state->field_regex,
                                         state->regex_field_name);
             if (selected < 0) return 0;
             if (selected) {
@@ -375,27 +389,115 @@ static int row_matches(const TuiState *state, const TuiRow *row)
            regex_search(state->search_regex, row->text, row->length) == REGEX_MATCH;
 }
 
-static void print_safe(const unsigned char *text, size_t length, size_t maximum)
+static void navigate_first_match(TuiState *state)
+{
+    uint64_t sequence;
+    if (state->search_regex == NULL || state->total_rows == 0) return;
+    for (sequence = oldest_sequence(state); sequence < state->total_rows; sequence++) {
+        if (!ensure_sequence(state, sequence)) {
+            snprintf(state->status, sizeof(state->status), "Cannot load indexed records");
+            return;
+        }
+        if (row_matches(state, row_at(state, sequence))) {
+            state->cursor = sequence;
+            state->status[0] = '\0';
+            return;
+        }
+    }
+    snprintf(state->status, sizeof(state->status), "No matching record");
+}
+
+static int restart_scan(TuiState *state)
+{
+    if (!reader_reposition(state->reader, 0, 0)) {
+        snprintf(state->status, sizeof(state->status), "Cannot restart the input scan");
+        return 0;
+    }
+    if (!reset_indexes(state)) {
+        snprintf(state->status, sizeof(state->status),
+                 "Cannot create temporary navigation index");
+        return 0;
+    }
+    state->scanning = 1;
+    state->follow_waiting = 0;
+    snprintf(state->status, sizeof(state->status),
+             "Scanning file; progress updates every 65,536 records");
+    return 1;
+}
+
+static size_t record_prefix_width(uint64_t line_number)
+{
+    size_t digits = 1;
+    while (line_number >= 10) {
+        line_number /= 10;
+        digits++;
+    }
+    return (digits > 8 ? digits : 8) + 1;
+}
+
+static void print_safe(const unsigned char *text, size_t length, size_t maximum,
+                       int source_truncated, int compact_spaces)
 {
     size_t index;
-    size_t limit = length < maximum ? length : maximum;
-    for (index = 0; index < limit; index++) {
+    size_t used = 0;
+    const char *marker = " [preview clipped]";
+    size_t marker_length = strlen(marker);
+    int clipped = source_truncated || length > maximum;
+    int previous_space = 0;
+    size_t content_limit = maximum;
+    if (clipped) {
+        if (maximum < marker_length) {
+            marker = "...";
+            marker_length = maximum < 3 ? maximum : 3;
+        }
+        content_limit = maximum - marker_length;
+    }
+    for (index = 0; index < length && used < content_limit; index++) {
         unsigned char byte = text[index];
         size_t sequence_length = 1;
         int valid = 1;
+        if (byte == '\t' && !compact_spaces) {
+            size_t spaces = 4 - (used % 4);
+            size_t space_index;
+            if (used + spaces > content_limit) break;
+            for (space_index = 0; space_index < spaces; space_index++) {
+                fputc(' ', stdout);
+            }
+            used += spaces;
+            previous_space = 0;
+            continue;
+        }
+        if (byte == ' ' && !compact_spaces) {
+            fputc(' ', stdout);
+            used++;
+            previous_space = 0;
+            continue;
+        }
+        if (byte == ' ' || byte == '\t' || byte == '\r' || byte == '\n') {
+            if (compact_spaces && !previous_space) {
+                fputc(' ', stdout);
+                used++;
+                previous_space = 1;
+            }
+            continue;
+        }
         if (byte < 0x20 || byte == 0x7f) {
             fputc('.', stdout);
+            used++;
+            previous_space = 0;
             continue;
         }
         if (byte < 0x80) {
             fputc(byte, stdout);
+            used++;
+            previous_space = 0;
             continue;
         }
         if (byte >= 0xc2 && byte <= 0xdf) sequence_length = 2;
         else if (byte >= 0xe0 && byte <= 0xef) sequence_length = 3;
         else if (byte >= 0xf0 && byte <= 0xf4) sequence_length = 4;
         else valid = 0;
-        if (valid && index + sequence_length > limit) valid = 0;
+        if (valid && index + sequence_length > length) valid = 0;
         if (valid) {
             size_t offset;
             for (offset = 1; offset < sequence_length; offset++) {
@@ -409,12 +511,283 @@ static void print_safe(const unsigned char *text, size_t length, size_t maximum)
         }
         if (!valid) {
             fputc('.', stdout);
+            used++;
+            previous_space = 0;
             continue;
         }
+        if (used + sequence_length > content_limit) break;
         fwrite(text + index, 1, sequence_length, stdout);
+        used += sequence_length;
+        previous_space = 0;
         index += sequence_length - 1;
     }
-    if (length > maximum) fputs("...", stdout);
+    if (clipped && marker_length != 0) fwrite(marker, 1, marker_length, stdout);
+}
+
+static void print_record(uint64_t line_number, const unsigned char *text,
+                         size_t length, int source_truncated, int columns)
+{
+    size_t prefix_width = record_prefix_width(line_number);
+    size_t available = columns > (int)prefix_width ?
+                       (size_t)columns - prefix_width : 0;
+    printf("%8llu ", (unsigned long long)line_number);
+    print_safe(text, length, available, source_truncated, 1);
+}
+
+static size_t zoom_character_bytes(const unsigned char *text, size_t length,
+                                   size_t offset)
+{
+    unsigned char first = text[offset];
+    size_t count = 1;
+    size_t index;
+    if (first >= 0xc2 && first <= 0xdf) count = 2;
+    else if (first >= 0xe0 && first <= 0xef) count = 3;
+    else if (first >= 0xf0 && first <= 0xf4) count = 4;
+    if (offset + count > length) return 1;
+    for (index = 1; index < count; index++) {
+        if ((text[offset + index] & 0xc0) != 0x80) return 1;
+    }
+    return count;
+}
+
+static size_t zoom_next_offset(const unsigned char *text, size_t length,
+                               size_t start, size_t width)
+{
+    size_t offset = start;
+    size_t used = 0;
+    while (offset < length) {
+        unsigned char byte = text[offset];
+        size_t bytes = 1;
+        size_t columns;
+        if (byte == '\n') return offset + 1;
+        if (byte == '\r') {
+            return offset + (offset + 1 < length && text[offset + 1] == '\n' ? 2 : 1);
+        }
+        if (byte == '\t') columns = 4 - (used % 4);
+        else {
+            if (byte >= 0xc2 && byte <= 0xdf) bytes = 2;
+            else if (byte >= 0xe0 && byte <= 0xef) bytes = 3;
+            else if (byte >= 0xf0 && byte <= 0xf4) bytes = 4;
+            bytes = zoom_character_bytes(text, length, offset);
+            columns = bytes;
+        }
+        if (used != 0 && used + columns > width) return offset;
+        used += columns;
+        offset += bytes;
+        if (used >= width) return offset;
+    }
+    return offset;
+}
+
+static int zoom_write_offset(FILE *index_file, size_t offset)
+{
+    uint64_t value = (uint64_t)offset;
+    return fwrite(&value, sizeof(value), 1, index_file) == 1;
+}
+
+static int zoom_build_index(FILE *index_file, const unsigned char *text,
+                            size_t length, size_t width, uint64_t *line_count)
+{
+    size_t offset = 0;
+    uint64_t count = 1;
+    if (!zoom_write_offset(index_file, 0)) return 0;
+    while (offset < length) {
+        size_t next = zoom_next_offset(text, length, offset, width);
+        if (next <= offset) return 0;
+        if (next < length || (next == length && length != 0 &&
+                              text[length - 1] == '\n')) {
+            if (!zoom_write_offset(index_file, next)) return 0;
+            count++;
+        }
+        offset = next;
+    }
+    if (fflush(index_file) != 0) return 0;
+    *line_count = count;
+    return 1;
+}
+
+static int zoom_read_offset(FILE *index_file, uint64_t index,
+                            uint64_t *offset)
+{
+    if (index > UINT64_MAX / sizeof(*offset) ||
+        !tui_seek(index_file, index * sizeof(*offset))) return 0;
+    return fread(offset, sizeof(*offset), 1, index_file) == 1;
+}
+
+static void render_zoom(const unsigned char *text, size_t length,
+                        uint64_t line_count, uint64_t top,
+                        size_t width, int rows,
+                        uint64_t source_line, FILE *zoom_index)
+{
+    uint64_t visible = (uint64_t)(rows > 4 ? rows - 4 : 1);
+    uint64_t index;
+    fputs("\033[H\033[2J\033[?25l", stdout);
+    printf("Record zoom | source line %llu | display rows %llu-%llu of %llu\n",
+           (unsigned long long)source_line,
+           (unsigned long long)(top + 1),
+           (unsigned long long)(top + visible < line_count ? top + visible : line_count),
+           (unsigned long long)line_count);
+    for (index = 0; index < visible; index++) {
+        uint64_t row_index = top + index;
+        uint64_t start_value;
+        uint64_t end_value;
+        size_t start;
+        size_t end;
+        size_t print_length;
+        if (row_index >= line_count) {
+            fputc('\n', stdout);
+            continue;
+        }
+        if (!zoom_read_offset(zoom_index, row_index, &start_value)) break;
+        if (row_index + 1 < line_count) {
+            if (!zoom_read_offset(zoom_index, row_index + 1, &end_value)) break;
+        } else {
+            end_value = (uint64_t)length;
+        }
+        start = start_value > (uint64_t)length ? length : (size_t)start_value;
+        end = end_value > (uint64_t)length ? length : (size_t)end_value;
+        if (end < start) end = start;
+        print_length = end - start;
+        if (print_length != 0 && text[start + print_length - 1] == '\n') {
+            print_length--;
+            if (print_length != 0 && text[start + print_length - 1] == '\r') {
+                print_length--;
+            }
+        }
+        fputs("  ", stdout);
+        print_safe(text + start, print_length, width, 0, 0);
+        fputc('\n', stdout);
+    }
+    printf("\033[%d;1H\033[2KUp/Down: scroll  PgUp/PgDn: page  Home/End: file  z/Enter/Esc: close",
+           rows);
+    fflush(stdout);
+}
+
+static int zoom_selected_record(TuiState *state)
+{
+    TuiRow *selected;
+    TuiRow row_copy;
+    FILE *source = NULL;
+    FILE *index_file = NULL;
+    LineReader zoom_reader;
+    const unsigned char *record = NULL;
+    size_t record_length = 0;
+    uint64_t line_number = 0;
+    uint64_t byte_offset = 0;
+    uint64_t line_count = 0;
+    uint64_t top = 0;
+    size_t width = 0;
+    int rendered_rows = 0;
+    int redraw = 1;
+    int initialized = 0;
+    int result_code = 0;
+    ReaderResult result;
+    if (state->scanning || state->total_rows == 0) {
+        snprintf(state->status, sizeof(state->status),
+                 "Zoom is available after the scan completes");
+        return 0;
+    }
+    if (!ensure_sequence(state, state->cursor)) {
+        snprintf(state->status, sizeof(state->status), "Cannot load selected record");
+        return 0;
+    }
+    selected = row_at(state, state->cursor);
+    if (selected == NULL || state->input_path == NULL ||
+        strcmp(state->input_path, "-") == 0) {
+        snprintf(state->status, sizeof(state->status), "Cannot reopen the input file for zoom");
+        return 0;
+    }
+    row_copy = *selected;
+    source = fopen(state->input_path, "rb");
+    if (source == NULL || !reader_init(&zoom_reader, source,
+                                       state->reader->max_line_bytes)) {
+        if (source != NULL) fclose(source);
+        snprintf(state->status, sizeof(state->status), "Cannot open selected record for zoom");
+        return 0;
+    }
+    initialized = 1;
+    if (!reader_reposition(&zoom_reader, row_copy.byte_offset,
+                           row_copy.line_number - 1)) {
+        snprintf(state->status, sizeof(state->status), "Cannot seek to selected record");
+        goto cleanup;
+    }
+    result = state->format == FORMAT_JSONL ?
+        reader_next_json(&zoom_reader, &record, &record_length, &line_number,
+                         &byte_offset, NULL, NULL) :
+        reader_next(&zoom_reader, &record, &record_length, &line_number,
+                    &byte_offset);
+    if (result != READER_LINE) {
+        snprintf(state->status, sizeof(state->status), "Cannot read complete selected record");
+        goto cleanup;
+    }
+    index_file = tmpfile();
+    if (index_file == NULL) {
+        snprintf(state->status, sizeof(state->status), "Cannot create zoom line index");
+        goto cleanup;
+    }
+    for (;;) {
+        int new_columns;
+        int new_rows;
+        uint64_t visible;
+        terminal_get_size(state->terminal, &new_columns, &new_rows);
+        if (new_columns < 24) new_columns = 24;
+        if (new_rows < 5) new_rows = 5;
+        if (new_rows != rendered_rows) redraw = 1;
+        if (width != (size_t)(new_columns - 4)) {
+            width = (size_t)(new_columns - 4);
+            redraw = 1;
+            fclose(index_file);
+            index_file = tmpfile();
+            if (index_file == NULL ||
+                !zoom_build_index(index_file, record, record_length,
+                                  width, &line_count)) {
+                snprintf(state->status, sizeof(state->status), "Cannot index zoom record lines");
+                goto cleanup;
+            }
+            visible = (uint64_t)(new_rows > 4 ? new_rows - 4 : 1);
+            if (top + visible > line_count) {
+                top = line_count > visible ? line_count - visible : 0;
+            }
+        }
+        if (redraw) {
+            render_zoom(record, record_length, line_count, top,
+                        width, new_rows, row_copy.line_number,
+                        index_file);
+            rendered_rows = new_rows;
+            redraw = 0;
+        }
+        {
+            TerminalKey key = terminal_read_key(state->terminal, 150);
+            uint64_t page = (uint64_t)(new_rows > 4 ? new_rows - 4 : 1);
+            uint64_t previous_top = top;
+            if (key.type == TERMINAL_KEY_ESCAPE ||
+                key.type == TERMINAL_KEY_ENTER ||
+                key.type == TERMINAL_KEY_SHIFT_ENTER ||
+                (key.type == TERMINAL_KEY_CHARACTER && key.character == 'z')) {
+                break;
+            }
+            if (key.type == TERMINAL_KEY_CHARACTER && key.character == 'q') {
+                result_code = 1;
+                break;
+            }
+            if (key.type == TERMINAL_KEY_HOME) top = 0;
+            else if (key.type == TERMINAL_KEY_END) {
+                top = line_count > page ? line_count - page : 0;
+            } else if (key.type == TERMINAL_KEY_UP && top != 0) top--;
+            else if (key.type == TERMINAL_KEY_DOWN && top + page < line_count) top++;
+            else if (key.type == TERMINAL_KEY_PAGE_UP) top = top > page ? top - page : 0;
+            else if (key.type == TERMINAL_KEY_PAGE_DOWN) {
+                top = top + page + page < line_count ? top + page :
+                      (line_count > page ? line_count - page : 0);
+            }
+            if (top != previous_top) redraw = 1;
+        }
+    }
+cleanup:
+    if (index_file != NULL) fclose(index_file);
+    if (initialized) reader_destroy(&zoom_reader);
+    if (source != NULL) fclose(source);
+    return result_code;
 }
 
 static void render_scan_progress(TuiState *state)
@@ -504,10 +877,13 @@ static void render(TuiState *state)
         for (index = 0; index < visible - 8; index++) fputc('\n', stdout);
     } else if (state->help_visible) {
         fputs("\n  Up/Down: move one row     PgUp/PgDn: move one page\n"
-              "  Home/End: oldest/newest  /: regex search  n/N: next/previous match\n"
+              "  Home/End: oldest/newest  /: search  Enter/Shift+Enter: next/previous match\n"
+              "  z: zoom the selected record and scroll through its full contents\n"
               "  e/E: next/previous error  w/W: next/previous warning\n"
               "  c: show/hide context around the selected record\n"
               "  f: edit field filter and rescan  r: edit raw regex and rescan\n"
+              "  C: clear search and all filters\n"
+              "  x: export filtered/search results (use .csv for CSV)\n"
               "  ?: close help  q: quit\n\n"
               "Search and filtering use the built-in regular expression syntax.\n", stdout);
         for (index = 0; index < rows - 10; index++) fputc('\n', stdout);
@@ -536,8 +912,8 @@ static void render(TuiState *state)
             if (row->line_number == state->context_anchor_line) {
                 fputs("\033[7m", stdout);
             }
-            printf("%8llu ", (unsigned long long)row->line_number);
-            print_safe(row->text, row->length, (size_t)(columns - 12));
+            print_record(row->line_number, row->text, row->length,
+                         row->length == TUI_PREVIEW_BYTES, columns);
             fputs("\033[0m\n", stdout);
         }
         for (index = context_rows_visible; index < rows - 6; index++) fputc('\n', stdout);
@@ -553,15 +929,15 @@ static void render(TuiState *state)
             else if (row_matches(state, row)) fputs("\033[33m", stdout);
             else if (row->severity == TUI_LEVEL_ERROR) fputs("\033[31;1m", stdout);
             else if (row->severity == TUI_LEVEL_WARNING) fputs("\033[33m", stdout);
-            printf("%8llu ", (unsigned long long)row->line_number);
-            print_safe(row->text, row->length, (size_t)(columns - 12));
-            if (row->length == TUI_PREVIEW_BYTES) fputs(" [preview clipped]", stdout);
+            print_record(row->line_number, row->text, row->length,
+                         row->length == TUI_PREVIEW_BYTES, columns);
             fputs("\033[0m\n", stdout);
         }
     }
     printf("\033[%d;1H\033[2K%s%s", rows - 1,
            state->search_text[0] ? "Search: " : "Search: (none) | ",
-           state->search_text[0] ? state->search_text : "? help  / search  f filter  r regex  q quit");
+           state->search_text[0] ? state->search_text :
+           "? help  / search  f filter  r regex  x export  q quit");
     printf("\033[%d;1H\033[2K%s", rows, state->status);
     fflush(stdout);
     state->terminal_columns = columns;
@@ -659,13 +1035,181 @@ static int prompt_search(TuiState *state)
     state->search_regex = replacement;
     strcpy(state->search_text, text);
     state->status[0] = '\0';
+    if (replacement != NULL) navigate_first_match(state);
+    else if (state->total_rows != 0) state->cursor = oldest_sequence(state);
+    return 0;
+}
+
+static int has_csv_extension(const char *path)
+{
+    size_t length = strlen(path);
+    const char *extension;
+    if (length < 4) return 0;
+    extension = path + length - 4;
+    return extension[0] == '.' &&
+           tolower((unsigned char)extension[1]) == 'c' &&
+           tolower((unsigned char)extension[2]) == 's' &&
+           tolower((unsigned char)extension[3]) == 'v';
+}
+
+static int initialize_export_sink(OutputSink *sink, const char *requested_path,
+                                   const char *input_path, OutputFormat format,
+                                   char *actual_path, size_t actual_capacity,
+                                   char *error, size_t error_capacity)
+{
+    if (requested_path[0] != '\0') {
+        int length = snprintf(actual_path, actual_capacity, "%s", requested_path);
+        if (length < 0 || (size_t)length >= actual_capacity) {
+            snprintf(error, error_capacity, "export path is too long");
+            return 0;
+        }
+        return output_init(sink, actual_path, input_path, format, NULL, 0,
+                           error, error_capacity);
+    }
+    else {
+        const char *name = input_path;
+        const char *separator;
+        const char *extension;
+        size_t stem_length;
+        size_t extension_length;
+        uint64_t sequence;
+        separator = strrchr(name, '/');
+        if (strrchr(name, '\\') != NULL &&
+            (separator == NULL || strrchr(name, '\\') > separator)) {
+            separator = strrchr(name, '\\');
+        }
+        if (separator != NULL) name = separator + 1;
+        extension = strrchr(name, '.');
+        if (extension == name) extension = NULL;
+        stem_length = extension == NULL ? strlen(name) : (size_t)(extension - name);
+        extension_length = extension == NULL ? 0 : strlen(extension);
+        if (name[0] == '\0' || stem_length + extension_length >= actual_capacity) {
+            snprintf(error, error_capacity, "cannot derive an export filename from the input path");
+            return 0;
+        }
+        for (sequence = 1; sequence != 0; sequence++) {
+            int length = snprintf(actual_path, actual_capacity, "%.*s_%llu%s",
+                                 (int)stem_length, name,
+                                 (unsigned long long)sequence,
+                                 extension == NULL ? "" : extension);
+            if (length < 0 || (size_t)length >= actual_capacity) {
+                snprintf(error, error_capacity, "generated export filename is too long");
+                return 0;
+            }
+            errno = 0;
+            if (output_init(sink, actual_path, input_path, format, NULL, 0,
+                            error, error_capacity)) return 1;
+            output_finish(sink);
+            if (errno != EEXIST) return 0;
+        }
+    }
+    snprintf(error, error_capacity, "no available numbered export filename remains");
+    return 0;
+}
+
+static int export_view(TuiState *state)
+{
+    char requested_path[TUI_QUERY_BYTES];
+    char path[TUI_QUERY_BYTES];
+    char error[160] = "";
+    OutputSink sink;
+    OutputFormat format;
+    uint64_t saved_offset = state->reader->next_offset;
+    uint64_t saved_line_number = state->reader->next_line_number;
+    uint64_t exported = 0;
+    int success = 1;
+    if (state->scanning) {
+        snprintf(state->status, sizeof(state->status), "Export is available after the scan completes");
+        return 0;
+    }
+    if (!terminal_read_line(state->terminal, "Export path (Enter for numbered default): ",
+                            requested_path, sizeof(requested_path))) return 0;
+    format = has_csv_extension(requested_path[0] == '\0' ? state->input_path :
+                               requested_path) ? OUTPUT_CSV : OUTPUT_TEXT;
+    if (!initialize_export_sink(&sink, requested_path, state->input_path, format,
+                                path, sizeof(path), error, sizeof(error))) {
+        output_finish(&sink);
+        snprintf(state->status, sizeof(state->status), "Export failed: %.125s", error);
+        return 0;
+    }
+    if (!reader_reposition(state->reader, 0, 0)) {
+        snprintf(error, sizeof(error), "cannot restart the input scan");
+        success = 0;
+    }
+    while (success) {
+        const unsigned char *line;
+        size_t length;
+        uint64_t number;
+        uint64_t offset;
+        ReaderResult result = state->format == FORMAT_JSONL ?
+            reader_next_json(state->reader, &line, &length, &number, &offset,
+                             NULL, NULL) :
+            reader_next(state->reader, &line, &length, &number, &offset);
+        if (result == READER_EOF) break;
+        if (result == READER_ERROR) {
+            snprintf(error, sizeof(error), "input read error");
+            success = 0;
+            break;
+        }
+        if (result != READER_LINE) continue;
+        {
+            LogEntry entry;
+            int selected;
+            if (!parse_record(state->format, state->custom_pattern, state->scratch,
+                              line, length, number, offset, &entry)) continue;
+            selected = record_selected(&entry, line, length,
+                                       *state->field_filter, *state->raw_regex,
+                                       *state->field_regex, state->regex_field_name);
+            if (selected < 0) {
+                snprintf(error, sizeof(error), "regex work limit exceeded at line %llu",
+                         (unsigned long long)number);
+                success = 0;
+                break;
+            }
+            if (selected && state->search_regex != NULL) {
+                size_t search_length = length < TUI_PREVIEW_BYTES ?
+                                       length : TUI_PREVIEW_BYTES;
+                RegexResult search_result = regex_search(state->search_regex,
+                                                         line, search_length);
+                if (search_result == REGEX_WORK_LIMIT) {
+                    snprintf(error, sizeof(error), "search work limit exceeded at line %llu",
+                             (unsigned long long)number);
+                    success = 0;
+                    break;
+                }
+                selected = search_result == REGEX_MATCH;
+            }
+            if (selected) {
+                if (!output_write(&sink, &entry) || exported == UINT64_MAX) {
+                    snprintf(error, sizeof(error), "cannot write export file");
+                    success = 0;
+                    break;
+                }
+                exported++;
+            }
+        }
+    }
+    if (!reader_reposition(state->reader, saved_offset, saved_line_number)) {
+        snprintf(error, sizeof(error), "cannot restore input position");
+        success = 0;
+    }
+    if (!output_finish(&sink)) {
+        snprintf(error, sizeof(error), "cannot finish writing export file");
+        success = 0;
+    }
+    if (success) {
+        snprintf(state->status, sizeof(state->status),
+                 "Exported %llu record%s to %.90s",
+                 (unsigned long long)exported, exported == 1 ? "" : "s", path);
+    } else {
+        snprintf(state->status, sizeof(state->status), "Export failed: %.125s", error);
+    }
     return 0;
 }
 
 static int handle_key(TuiState *state, TerminalKey key, Filter **filter,
-                      Regex **raw_regex, Regex *field_regex,
-                      const char *regex_field_name, FILE *input,
-                      LineReader *reader)
+                      Regex **raw_regex, Regex **field_regex,
+                      const char *regex_field_name)
 {
     uint64_t oldest = oldest_sequence(state);
     uint64_t page;
@@ -680,9 +1224,35 @@ static int handle_key(TuiState *state, TerminalKey key, Filter **filter,
         state->help_visible = 0;
         return 0;
     }
+    if (key.type == TERMINAL_KEY_ENTER) {
+        navigate_match(state, 1);
+    } else if (key.type == TERMINAL_KEY_SHIFT_ENTER) {
+        navigate_match(state, -1);
+    }
     if (key.type == TERMINAL_KEY_CHARACTER) {
         if (key.character == 'q') return 1;
         if (key.character == '?') state->help_visible = 1;
+        else if (key.character == 'z') return zoom_selected_record(state);
+        else if (key.character == 'C') {
+            int changed = state->search_regex != NULL || *filter != NULL ||
+                          *raw_regex != NULL || *field_regex != NULL;
+            regex_free(state->search_regex);
+            state->search_regex = NULL;
+            state->search_text[0] = '\0';
+            filter_free(*filter);
+            *filter = NULL;
+            regex_free(*raw_regex);
+            *raw_regex = NULL;
+            regex_free(*field_regex);
+            *field_regex = NULL;
+            if (changed) {
+                if (!restart_scan(state)) return 0;
+                return 2;
+            }
+            state->cursor = oldest_sequence(state);
+            state->context_visible = 0;
+            snprintf(state->status, sizeof(state->status), "Search and filters cleared");
+        }
         else if (key.character == 'c') {
             if (state->scanning) {
                 snprintf(state->status, sizeof(state->status), "Context is available after the scan completes");
@@ -692,6 +1262,7 @@ static int handle_key(TuiState *state, TerminalKey key, Filter **filter,
             }
         }
         else if (key.character == '/') prompt_search(state);
+        else if (key.character == 'x') export_view(state);
         else if (key.character == 'n') navigate_match(state, 1);
         else if (key.character == 'N') navigate_match(state, -1);
         else if (key.character == 'e') navigate_level(state, TUI_LEVEL_ERROR, 1);
@@ -725,18 +1296,7 @@ static int handle_key(TuiState *state, TerminalKey key, Filter **filter,
                 regex_free(*raw_regex);
                 *raw_regex = replacement;
             }
-            if (!reader_reposition(reader, 0, 0)) {
-                snprintf(state->status, sizeof(state->status), "Cannot restart the input scan");
-                return 0;
-            }
-            if (!reset_indexes(state)) {
-                snprintf(state->status, sizeof(state->status), "Cannot create temporary navigation index");
-                return 0;
-            }
-            state->status[0] = '\0';
-            state->scanning = 1;
-            snprintf(state->status, sizeof(state->status), "Scanning file; progress updates every 65,536 records");
-            return 2;
+            return restart_scan(state) ? 2 : 0;
         }
     } else if (key.type == TERMINAL_KEY_UP && state->cursor > oldest) state->cursor--;
     else if (key.type == TERMINAL_KEY_DOWN && state->cursor + 1 < state->total_rows) state->cursor++;
@@ -744,9 +1304,7 @@ static int handle_key(TuiState *state, TerminalKey key, Filter **filter,
     else if (key.type == TERMINAL_KEY_PAGE_DOWN) state->cursor = state->cursor + page < state->total_rows ? state->cursor + page : state->total_rows - (state->total_rows != 0);
     else if (key.type == TERMINAL_KEY_HOME) state->cursor = oldest;
     else if (key.type == TERMINAL_KEY_END && state->total_rows != 0) state->cursor = state->total_rows - 1;
-    (void)field_regex;
     (void)regex_field_name;
-    (void)input;
     return 0;
 }
 
@@ -758,8 +1316,7 @@ static int wait_for_follow(TuiState *state, int *should_quit)
         TerminalKey key = terminal_read_key(state->terminal, 250);
         int action = handle_key(state, key, state->field_filter,
                                 state->raw_regex, state->field_regex,
-                                state->regex_field_name, state->input,
-                                state->reader);
+                                state->regex_field_name);
         FollowResult follow_result;
         if (action == 1) {
             *should_quit = 1;
@@ -807,8 +1364,9 @@ static int wait_for_follow(TuiState *state, int *should_quit)
 
 int tui_run(FILE **input_file, LineReader *reader, InputFormat format,
             const char *custom_pattern, JsonScratch *scratch,
-            Filter **field_filter, Regex **raw_regex, Regex *field_regex,
+            Filter **field_filter, Regex **raw_regex, Regex **field_regex,
             const char *regex_field_name, int follow_enabled,
+            const char *input_path,
             const char *follow_path)
 {
     TuiState state;
@@ -833,6 +1391,7 @@ int tui_run(FILE **input_file, LineReader *reader, InputFormat format,
     state.field_regex = field_regex;
     state.regex_field_name = regex_field_name;
     state.follow_enabled = follow_enabled;
+    state.input_path = input_path;
     state.follow_path = follow_path;
     if (!terminal_enter(&state.terminal)) {
         fputs("logview: --tui requires an interactive input and output terminal.\n", stderr);
@@ -865,7 +1424,10 @@ int tui_run(FILE **input_file, LineReader *reader, InputFormat format,
             if (should_quit) break;
             continue;
         }
-        ReaderResult result = reader_next(reader, &line, &length, &number, &offset);
+        ReaderResult result = format == FORMAT_JSONL ?
+            reader_next_json(reader, &line, &length, &number, &offset,
+                             index_physical_line, &state) :
+            reader_next(reader, &line, &length, &number, &offset);
         if (result == READER_ERROR) {
             result_code = 2;
             snprintf(state.status, sizeof(state.status), "Input read error");
@@ -890,7 +1452,7 @@ int tui_run(FILE **input_file, LineReader *reader, InputFormat format,
                 TerminalKey key = terminal_read_key(state.terminal, 250);
                 int action = handle_key(&state, key,
                                         field_filter, raw_regex, field_regex,
-                                        regex_field_name, state.input, reader);
+                                        regex_field_name);
                 if (action == 1) should_quit = 1;
                 else if (action == 2) break;
                 else if (key.type != TERMINAL_KEY_NONE) render(&state);
@@ -911,8 +1473,9 @@ int tui_run(FILE **input_file, LineReader *reader, InputFormat format,
             state.follow_waiting = 1;
             continue;
         }
-        state.physical_records = number;
-        if (!add_physical_checkpoint(&state, number, offset)) {
+        state.physical_records = format == FORMAT_JSONL ? reader->next_line_number : number;
+        if (format != FORMAT_JSONL &&
+            !add_physical_checkpoint(&state, number, offset)) {
             snprintf(state.status, sizeof(state.status), "Cannot write temporary context index");
             state.scanning = 0;
             render(&state);
@@ -929,7 +1492,7 @@ int tui_run(FILE **input_file, LineReader *reader, InputFormat format,
             if (parse_record(format, custom_pattern, scratch, line, length,
                              number, offset, &entry)) {
                 selected = record_selected(&entry, line, length, *field_filter,
-                                           *raw_regex, field_regex,
+                                           *raw_regex, *field_regex,
                                            regex_field_name);
             if (selected < 0) {
                     snprintf(state.status, sizeof(state.status), "Regex work limit exceeded at line %llu",
@@ -961,7 +1524,7 @@ int tui_run(FILE **input_file, LineReader *reader, InputFormat format,
             TerminalKey key = terminal_read_key(state.terminal, 0);
             int action = handle_key(&state, key,
                                     field_filter, raw_regex, field_regex,
-                                    regex_field_name, state.input, reader);
+                                    regex_field_name);
             if (action == 1) should_quit = 1;
             else if (action == 2) render(&state);
             else if (key.type != TERMINAL_KEY_NONE) render(&state);

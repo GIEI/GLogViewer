@@ -117,11 +117,26 @@ static int parse_predicate(FilterParser *parser)
     skip_space(parser);
     start = parser->position;
     while (isalnum((unsigned char)parser->text[parser->position]) ||
-           parser->text[parser->position] == '_') parser->position++;
+           parser->text[parser->position] == '_' ||
+           parser->text[parser->position] == '.') parser->position++;
     length = parser->position - start;
     if (length == 0 || length >= FILTER_TEXT_CAPACITY) {
         snprintf(parser->error, parser->error_capacity, "expected a field name");
         return -1;
+    }
+    if (parser->text[start] == '.' || parser->text[start + length - 1] == '.') {
+        snprintf(parser->error, parser->error_capacity, "invalid field path");
+        return -1;
+    }
+    {
+        size_t index;
+        for (index = 1; index < length; index++) {
+            if (parser->text[start + index] == '.' &&
+                parser->text[start + index - 1] == '.') {
+                snprintf(parser->error, parser->error_capacity, "invalid field path");
+                return -1;
+            }
+        }
     }
     node_index = new_node(parser, NODE_PREDICATE);
     if (node_index < 0) return -1;

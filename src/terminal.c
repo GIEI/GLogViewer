@@ -11,7 +11,6 @@
 #include <signal.h>
 
 #ifdef _WIN32
-#include <conio.h>
 #include <io.h>
 #include <windows.h>
 #else
@@ -31,6 +30,8 @@ struct TerminalState {
     DWORD original_output_mode;
 #else
     struct termios original_mode;
+    int pending_character;
+    int has_pending_character;
 #endif
     int active;
 };
@@ -91,6 +92,8 @@ int terminal_enter(TerminalState **state_out)
             return 0;
         }
     }
+    fputs("\033[>1u", stdout);
+    fflush(stdout);
 #endif
     state->active = 1;
     *state_out = state;
@@ -105,6 +108,7 @@ void terminal_leave(TerminalState *state)
         SetConsoleMode(state->input_handle, state->original_input_mode);
         SetConsoleMode(state->output_handle, state->original_output_mode);
 #else
+        fputs("\033[<u", stdout);
         tcsetattr(STDIN_FILENO, TCSANOW, &state->original_mode);
 #endif
         fputs("\033[0m\033[?25h\n", stdout);
@@ -116,24 +120,42 @@ void terminal_leave(TerminalState *state)
 #ifdef _WIN32
 static TerminalKey windows_key(void)
 {
-    int value = _getch();
-    if (value == 0 || value == 224) {
-        value = _getch();
-        if (value == 72) return make_key(TERMINAL_KEY_UP, 0);
-        if (value == 80) return make_key(TERMINAL_KEY_DOWN, 0);
-        if (value == 75) return make_key(TERMINAL_KEY_LEFT, 0);
-        if (value == 77) return make_key(TERMINAL_KEY_RIGHT, 0);
-        if (value == 73) return make_key(TERMINAL_KEY_PAGE_UP, 0);
-        if (value == 81) return make_key(TERMINAL_KEY_PAGE_DOWN, 0);
-        if (value == 71) return make_key(TERMINAL_KEY_HOME, 0);
-        if (value == 79) return make_key(TERMINAL_KEY_END, 0);
-        return make_key(TERMINAL_KEY_NONE, 0);
+    INPUT_RECORD event;
+    DWORD count;
+    while (ReadConsoleInputW(GetStdHandle(STD_INPUT_HANDLE), &event, 1, &count) &&
+           count == 1) {
+        WORD key;
+        if (event.EventType != KEY_EVENT || !event.Event.KeyEvent.bKeyDown) {
+            DWORD pending = 0;
+            if (!GetNumberOfConsoleInputEvents(GetStdHandle(STD_INPUT_HANDLE),
+                                               &pending) || pending == 0) {
+                return make_key(TERMINAL_KEY_NONE, 0);
+            }
+            continue;
+        }
+        key = event.Event.KeyEvent.wVirtualKeyCode;
+        if (key == VK_UP) return make_key(TERMINAL_KEY_UP, 0);
+        if (key == VK_DOWN) return make_key(TERMINAL_KEY_DOWN, 0);
+        if (key == VK_LEFT) return make_key(TERMINAL_KEY_LEFT, 0);
+        if (key == VK_RIGHT) return make_key(TERMINAL_KEY_RIGHT, 0);
+        if (key == VK_PRIOR) return make_key(TERMINAL_KEY_PAGE_UP, 0);
+        if (key == VK_NEXT) return make_key(TERMINAL_KEY_PAGE_DOWN, 0);
+        if (key == VK_HOME) return make_key(TERMINAL_KEY_HOME, 0);
+        if (key == VK_END) return make_key(TERMINAL_KEY_END, 0);
+        if (key == VK_RETURN) {
+            return make_key((event.Event.KeyEvent.dwControlKeyState & SHIFT_PRESSED) ?
+                            TERMINAL_KEY_SHIFT_ENTER : TERMINAL_KEY_ENTER, 0);
+        }
+        if (key == VK_BACK) return make_key(TERMINAL_KEY_BACKSPACE, 0);
+        if (event.Event.KeyEvent.uChar.UnicodeChar == 3) {
+            return make_key(TERMINAL_KEY_ESCAPE, 0);
+        }
+        if (event.Event.KeyEvent.uChar.UnicodeChar != 0) {
+            return make_key(TERMINAL_KEY_CHARACTER,
+                            (int)event.Event.KeyEvent.uChar.UnicodeChar);
+        }
     }
-    if (value == 3) return make_key(TERMINAL_KEY_ESCAPE, 0);
-    if (value == 13) return make_key(TERMINAL_KEY_ENTER, 0);
-    if (value == 8 || value == 127) return make_key(TERMINAL_KEY_BACKSPACE, 0);
-    if (value == 27) return make_key(TERMINAL_KEY_ESCAPE, 0);
-    return make_key(TERMINAL_KEY_CHARACTER, value);
+    return make_key(TERMINAL_KEY_NONE, 0);
 }
 #else
 static int wait_input(int milliseconds)
@@ -147,32 +169,65 @@ static int wait_input(int milliseconds)
     return select(STDIN_FILENO + 1, &input_set, NULL, NULL, &timeout) > 0;
 }
 
-static TerminalKey posix_key(int milliseconds)
+static TerminalKey posix_key(TerminalState *state, int milliseconds)
 {
     unsigned char value;
-    if (!wait_input(milliseconds) || read(STDIN_FILENO, &value, 1) != 1) {
-        return make_key(TERMINAL_KEY_NONE, 0);
+    if (state->has_pending_character) {
+        value = (unsigned char)state->pending_character;
+        state->has_pending_character = 0;
+    } else {
+        if (!wait_input(milliseconds) || read(STDIN_FILENO, &value, 1) != 1) {
+            return make_key(TERMINAL_KEY_NONE, 0);
+        }
     }
     if (value == 3) return make_key(TERMINAL_KEY_ESCAPE, 0);
     if (value == 13 || value == 10) return make_key(TERMINAL_KEY_ENTER, 0);
     if (value == 8 || value == 127) return make_key(TERMINAL_KEY_BACKSPACE, 0);
     if (value == 27) {
-        unsigned char sequence[2];
-        if (!wait_input(25) || read(STDIN_FILENO, &sequence[0], 1) != 1 || sequence[0] != '[' ||
-            !wait_input(25) || read(STDIN_FILENO, &sequence[1], 1) != 1) {
+        unsigned char sequence[32];
+        size_t length = 0;
+        unsigned char final = 0;
+        if (!wait_input(25) || read(STDIN_FILENO, &sequence[length], 1) != 1) {
             return make_key(TERMINAL_KEY_ESCAPE, 0);
         }
-        if (sequence[1] == 'A') return make_key(TERMINAL_KEY_UP, 0);
-        if (sequence[1] == 'B') return make_key(TERMINAL_KEY_DOWN, 0);
-        if (sequence[1] == 'C') return make_key(TERMINAL_KEY_RIGHT, 0);
-        if (sequence[1] == 'D') return make_key(TERMINAL_KEY_LEFT, 0);
-        if (sequence[1] == 'H') return make_key(TERMINAL_KEY_HOME, 0);
-        if (sequence[1] == 'F') return make_key(TERMINAL_KEY_END, 0);
-        if (sequence[1] == '5' || sequence[1] == '6') {
-            unsigned char terminator;
-            if (wait_input(25) && read(STDIN_FILENO, &terminator, 1) == 1 && terminator == '~') {
-                return make_key(sequence[1] == '5' ? TERMINAL_KEY_PAGE_UP : TERMINAL_KEY_PAGE_DOWN, 0);
+        if (sequence[length] == '\r' || sequence[length] == '\n') {
+            return make_key(TERMINAL_KEY_SHIFT_ENTER, 0);
+        }
+        if (sequence[length] != '[') {
+            state->pending_character = sequence[length];
+            state->has_pending_character = 1;
+            return make_key(TERMINAL_KEY_ESCAPE, 0);
+        }
+        length++;
+        while (length < sizeof(sequence) && wait_input(25) &&
+               read(STDIN_FILENO, &sequence[length], 1) == 1) {
+            final = sequence[length++];
+            if (final >= 0x40 && final <= 0x7e) break;
+        }
+        if (length == 0 || final < 0x40 || final > 0x7e) {
+            return make_key(TERMINAL_KEY_NONE, 0);
+        }
+        if (length < sizeof(sequence)) sequence[length] = '\0';
+        if (final == 'A') return make_key(TERMINAL_KEY_UP, 0);
+        if (final == 'B') return make_key(TERMINAL_KEY_DOWN, 0);
+        if (final == 'C') return make_key(TERMINAL_KEY_RIGHT, 0);
+        if (final == 'D') return make_key(TERMINAL_KEY_LEFT, 0);
+        if (final == 'H') return make_key(TERMINAL_KEY_HOME, 0);
+        if (final == 'F') return make_key(TERMINAL_KEY_END, 0);
+        if (final == 'u') {
+            unsigned int code = 0;
+            unsigned int modifiers = 1;
+            if (length < sizeof(sequence)) sequence[length - 1] = '\0';
+            if (sscanf((const char *)sequence, "%u;%u", &code, &modifiers) >= 1 &&
+                code == 13) {
+                return make_key(modifiers > 1 && ((modifiers - 1u) & 1u) != 0 ?
+                                TERMINAL_KEY_SHIFT_ENTER : TERMINAL_KEY_ENTER, 0);
             }
+        }
+        if (final == '~' && length >= 3 &&
+            (sequence[0] == '5' || sequence[0] == '6')) {
+            return make_key(sequence[0] == '5' ?
+                            TERMINAL_KEY_PAGE_UP : TERMINAL_KEY_PAGE_DOWN, 0);
         }
         return make_key(TERMINAL_KEY_NONE, 0);
     }
@@ -186,7 +241,7 @@ TerminalKey terminal_read_key(TerminalState *state, int wait_milliseconds)
 #ifdef _WIN32
     {
         DWORD started = GetTickCount();
-        while (!_kbhit()) {
+        while (WaitForSingleObject(state->input_handle, 0) != WAIT_OBJECT_0) {
             if (logview_stop_requested) return make_key(TERMINAL_KEY_NONE, 0);
             if (wait_milliseconds <= 0 || GetTickCount() - started >= (DWORD)wait_milliseconds) {
                 return make_key(TERMINAL_KEY_NONE, 0);
@@ -197,7 +252,7 @@ TerminalKey terminal_read_key(TerminalState *state, int wait_milliseconds)
     }
 #else
     if (logview_stop_requested) return make_key(TERMINAL_KEY_NONE, 0);
-    return posix_key(wait_milliseconds);
+    return posix_key(state, wait_milliseconds);
 #endif
 }
 
@@ -217,7 +272,8 @@ int terminal_read_line(TerminalState *state, const char *prompt,
         printf("\033[%d;1H\033[2K%s%s", rows, prompt, buffer);
         fflush(stdout);
         key = terminal_read_key(state, 100);
-        if (key.type == TERMINAL_KEY_ENTER) return 1;
+        if (key.type == TERMINAL_KEY_ENTER ||
+            key.type == TERMINAL_KEY_SHIFT_ENTER) return 1;
         if (key.type == TERMINAL_KEY_ESCAPE) return 0;
         if (key.type == TERMINAL_KEY_BACKSPACE && length != 0) {
             buffer[--length] = '\0';

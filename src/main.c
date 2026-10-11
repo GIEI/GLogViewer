@@ -259,10 +259,11 @@ static int split_assignment(const char *argument, char *field_name,
     }
     for (index = 1; index < name_length; index++) {
         unsigned char byte = (unsigned char)argument[index];
-        if (!((byte >= 'A' && byte <= 'Z') ||
-              (byte >= 'a' && byte <= 'z') ||
-              (byte >= '0' && byte <= '9') ||
-              byte == '_')) {
+        if (byte == '.') {
+            if (argument[index - 1] == '.' || index + 1 == name_length) return 0;
+        } else if (!((byte >= 'A' && byte <= 'Z') ||
+                     (byte >= 'a' && byte <= 'z') ||
+                     (byte >= '0' && byte <= '9') || byte == '_')) {
             return 0;
         }
     }
@@ -340,8 +341,11 @@ static int accumulate_timeline(FILE *input, LineReader *reader,
     for (;;) {
         LogEntry entry;
         int selected = 1;
-        read_result = reader_next(reader, &line, &line_length,
-                                  &line_number, &byte_offset);
+        read_result = options->format == FORMAT_JSONL ?
+            reader_next_json(reader, &line, &line_length, &line_number,
+                             &byte_offset, NULL, NULL) :
+            reader_next(reader, &line, &line_length, &line_number,
+                        &byte_offset);
         if (read_result == READER_EOF) return 1;
         if (read_result == READER_ERROR) return 0;
         if (read_result != READER_LINE || memchr(line, 0, line_length) != NULL) continue;
@@ -517,8 +521,9 @@ int main(int argc, char **argv)
     if (options.tui_mode) {
         result_code = tui_run(&input, &reader, options.format,
                               options.custom_pattern, &scratch,
-                              &field_filter, &raw_regex, field_regex,
+                              &field_filter, &raw_regex, &field_regex,
                               regex_field_name, options.follow_mode,
+                              options.input_path,
                               options.input_path);
         goto cleanup;
     }
@@ -532,8 +537,11 @@ int main(int argc, char **argv)
         LogEntry entry;
         int selected = 1;
 
-        read_result = reader_next(&reader, &line, &line_length,
-                                  &line_number, &byte_offset);
+        read_result = options.format == FORMAT_JSONL ?
+            reader_next_json(&reader, &line, &line_length, &line_number,
+                             &byte_offset, NULL, NULL) :
+            reader_next(&reader, &line, &line_length,
+                        &line_number, &byte_offset);
         if (read_result == READER_EOF) {
             if (!options.follow_mode) break;
             if (logview_stop_requested) {

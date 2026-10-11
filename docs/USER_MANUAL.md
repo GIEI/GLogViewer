@@ -1,6 +1,6 @@
 # User Manual
 
-**Status:** the batch CLI includes the 0.1 MVP, core 0.2 formats/filters, 0.3 reporting, and 0.4 follow features. The 0.5 TUI supports full-scan navigation using temporary checkpoints, filter editing, context view, and live follow; Windows CLI tests and the Linux PTY suite have passed. macOS validation and the formal release benchmark remain for the 1.0 MVP. The [roadmap](ROADMAP.md) gives implementation status and release gates.
+**Status:** the batch CLI includes the 0.1 MVP, core 0.2 formats/filters, 0.3 reporting, and 0.4 follow features. The 0.5 TUI supports full-scan navigation using temporary checkpoints, filter editing, context view, export of filtered/search-matched records, and live follow; Windows CLI tests and the Linux PTY suite have passed. macOS validation and the formal release benchmark remain for the 1.0 MVP. The [roadmap](ROADMAP.md) gives implementation status and release gates.
 
 ## 1. What the tool will do
 
@@ -76,7 +76,19 @@ Quote expressions for the shell. On Windows PowerShell and Unix shells, double q
 | `{"time":"2026-10-08T09:15:00Z","level":"ERROR","message":"timeout"}` | `jsonl` | Canonical timestamp, level, message plus original keys. |
 | `2026-10-08 09:15:00 ERROR timeout` | `custom` | Fields selected by the supplied pattern. |
 
-The `jsonl` preset accepts only a top-level object with primitive values, up to 64 unique keys and a 16 MiB line cap. Nested objects and arrays are rejected in v1. A malformed record can still be searched by raw-line regex. Docker JSON-file records in an exported copy can map `time` to timestamp and `log` to message. Docker advises against interacting directly with Docker-managed JSON log files; use a copy or supported export route. [Docker documentation](https://docs.docker.com/engine/logging/drivers/json-file/)
+The `jsonl` preset accepts one JSON object per line and a top-level array containing pretty-printed objects. Each object is one searchable record, even when it spans multiple physical lines. Nested objects and arrays are parsed to a maximum nesting depth of 64; primitive values are addressable by dotted paths such as `employee.department.manager.contact.phone`. A leaf alias such as `phone` also works when that leaf name is unique in the record. Each record has a 16 MiB maximum size and up to 64 extracted fields. Malformed records remain available to raw-line regex search. Docker JSON-file records in an exported copy can map `time` to timestamp and `log` to message. Docker advises against interacting directly with Docker-managed JSON log files; use a copy or supported export route. [Docker documentation](https://docs.docker.com/engine/logging/drivers/json-file/)
+
+For example, to find employee phone numbers beginning with `829` in a pretty-printed JSON file:
+
+```text
+logview employees_5-level_1-GB_formatted.json --format jsonl --regex-field "phone=^829"
+```
+
+To target the full nested path explicitly:
+
+```text
+logview employees_5-level_1-GB_formatted.json --format jsonl --regex-field "employee.department.manager.contact.phone=^829"
+```
 
 For a custom text format, supply placeholders in their literal order:
 
@@ -144,17 +156,21 @@ logview app.log --format jsonl --tui
 | Up/Down | Move one row. |
 | Page Up/Page Down | Move one screen. |
 | Home/End | Go to the first/last selected row in the scanned file. |
-| `/` | Enter a regex search over the scanned file. |
-| `n` / `N` | Go to the next/previous search match across the scanned file. |
+| `/` | Enter a regex search. Press Enter to jump to its first match. |
+| Enter / Shift+Enter | Go to the next/previous search match. |
+| `n` / `N` | Also go to the next/previous search match. |
 | `e` / `E` | Go to the next/previous error-level record. |
 | `w` / `W` | Go to the next/previous warning-level record. |
 | `c` | Show or hide four physical records before and after the selected record. |
+| `C` | Clear the search, field filter, raw regex, and field regex, then rescan the full input. |
+| `z` | Open a scrollable full-screen view of the complete selected record. Use arrows, Page Up/Page Down, Home/End to scroll; press `z`, Enter, or Esc to close. |
 | `f` | Edit the field filter and rescan from the beginning. |
 | `r` | Edit the raw-line regex and rescan from the beginning. |
+| `x` | Export records matching the active filters and search. Press Enter at the path prompt for a numbered filename in the current directory. |
 | `?` | Show help. |
 | `q` | Quit; in follow mode, stop waiting for new records. |
 
-Use `--follow --tui` to scan the file, then wait for appended complete records. A final incomplete line stays pending until its newline arrives. File rotation or truncation clears the current view and rescans the replacement file. `--flush-partial` is not supported in TUI follow mode. Error and warning jumps use the parsed `level` field when available; HTTP 5xx responses are treated as errors and 4xx responses as warnings. The status line shows scan state and search text. During the initial scan, a spinner and physical/selected record counters update every 65,536 physical records; the result rows appear when scanning completes. The TUI redraws its viewport after a terminal resize. It keeps a 256-row memory cache and stores navigation checkpoints in temporary files so it can reload rows and context from anywhere in the scanned file. The temporary directory must have enough free space for the indexes. Display text is limited to 1 KiB per row; longer rows are clipped, and searches inspect the displayed preview. Search matches are highlighted by row. Changing a filter or raw regex rescans the file. Log control characters are displayed safely, without executing terminal escape sequences.
+Use `--follow --tui` to scan the file, then wait for appended complete records. A final incomplete line stays pending until its newline arrives. File rotation or truncation clears the current view and rescans the replacement file. `--flush-partial` is not supported in TUI follow mode. Error and warning jumps use the parsed `level` field when available; HTTP 5xx responses are treated as errors and 4xx responses as warnings. The status line shows scan state and search text. During the initial scan, a spinner and physical/selected record counters update every 65,536 physical records; the result rows appear when scanning completes. The TUI redraws its viewport after a terminal resize. It keeps a 256-row memory cache and stores navigation checkpoints in temporary files so it can reload rows and context from anywhere in the scanned file. The temporary directory must have enough free space for the indexes. Display text is limited to 1 KiB per row and the available terminal width; long previews are clipped inline. Multiline JSON whitespace is compacted to keep each record on one screen row. Searches inspect the stored preview. Search matches are highlighted by row. Press `x` after scanning to export records matching the active filters and current search. Enter a path ending in `.csv` for CSV output; any other extension or no extension writes text. Press Enter without a path to save in the current directory using the input filename with `_1`, `_2`, and increasing numbers before its extension, skipping existing files. For example, `app.log` becomes `app_1.log`, then `app_2.log`. Changing a filter or raw regex rescans the file. Log control characters are displayed safely, without executing terminal escape sequences.
 
 ## 9. Exit codes and troubleshooting
 

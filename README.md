@@ -1,11 +1,11 @@
 # GLogViewer
 
-GLogViewer is a cross-platform, dependency-free C99 tool for exploring large structured log files from a command line or terminal interface. The executable is `logview`. The batch CLI supports raw and JSON Lines input, syslog RFC 3164/5424, Apache/Nginx access logs, custom patterns, format detection, compound filters, regex, text/CSV export, exact record/level counts, a timestamp timeline, estimated frequent field values, and follow mode with truncation and rotation detection. The TUI supports a bounded viewport, checkpoint-backed navigation and regex search across the full scan, error/warning jumps, physical context lines, filter edits, and live follow. The 0.5 interactive milestone is implemented; release validation remains in development. macOS validation is deferred to the 1.0 MVP. See the [roadmap](docs/ROADMAP.md) for remaining work to 1.0.
+GLogViewer is a cross-platform, dependency-free C99 tool for exploring large structured log files from a command line or terminal interface. The executable is `logview`. The batch CLI supports raw and JSON Lines input, syslog RFC 3164/5424, Apache/Nginx access logs, custom patterns, format detection, compound filters, regex, text/CSV export, exact record/level counts, a timestamp timeline, estimated frequent field values, and follow mode with truncation and rotation detection. The TUI supports a bounded viewport, checkpoint-backed navigation and regex search across the full scan, error/warning jumps, physical context lines, full-record zoom, filter edits, export of filtered/search-matched records, and live follow. The 0.5 interactive milestone is implemented; release validation remains in development. macOS validation is deferred to the 1.0 MVP. See the [roadmap](docs/ROADMAP.md) for remaining work to 1.0.
 
 ## Version 1.0 target
 
 - Stream files larger than 1 GB with bounded application memory.
-- Parse RFC 3164-like and RFC 5424 syslog, Apache/Nginx access logs, a defined JSON Lines subset, and custom placeholder patterns.
+- Parse RFC 3164-like and RFC 5424 syslog, Apache/Nginx access logs, JSON Lines plus pretty-printed JSON object arrays with nested fields, and custom placeholder patterns.
 - Combine field predicates and an internal regular expression engine.
 - Browse and search in a terminal UI, follow appended records, export text or CSV, and calculate summary statistics.
 - Build on Windows, macOS, and Linux using C99 plus minimal platform console and file APIs.
@@ -28,7 +28,7 @@ make test
 
 On macOS/Linux, `make clean && make test` is also supported when you want to remove the previous executable before testing.
 
-The Linux Makefile and test suite have passed on the user's Linux machine. macOS validation is deferred to the 1.0 MVP. Tests use temporary fixtures under `build/test-tmp` and scan local samples when present.
+The Linux Makefile and test suite have passed on the user's Linux machine. macOS validation is deferred to the 1.0 MVP. Tests use temporary fixtures under `build/test-tmp`, run targeted checks for the original large samples when present, and perform a full raw streaming scan of every other regular file under `SAMPLES`, including nested folders.
 
 ## CLI examples
 
@@ -38,6 +38,18 @@ build\logview.exe app.jsonl --format jsonl --filter "level=ERROR" --regex-field 
 ```
 
 Available formats are `raw` (the default), `jsonl`, `syslog3164`, `syslog5424`, `apache-common`, `apache-combined`, `nginx-combined`, `custom`, and `auto`. Filters support `=`, `!=`, `~`, `and`, `or`, and parentheses. Use `--help` for the exact options.
+
+For formatted JSON datasets, `jsonl` also accepts a top-level array of multiline objects and exposes nested primitive fields through dotted paths. A leaf field name such as `phone` can be used as a short alias when unambiguous in the record:
+
+```text
+build\logview.exe SAMPLES\employees_5-level_1-GB_formatted.json --format jsonl --regex-field "phone=^829"
+```
+
+Use the full path when you want to identify the exact nested field:
+
+```text
+build\logview.exe SAMPLES\employees_5-level_1-GB_formatted.json --format jsonl --regex-field "employee.department.manager.contact.phone=^829"
+```
 
 ## More examples
 

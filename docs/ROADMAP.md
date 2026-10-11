@@ -26,7 +26,7 @@ The numbers identify capability milestones, not calendar dates. A stage is compl
 
 ### Included
 
-1. **One local file, two explicit formats.** `--format raw` (default during 0.1) and `--format jsonl`. JSON Lines accepts the bounded top-level primitive-object subset defined in the technical specification; unknown or malformed objects remain visible as raw records but have no parsed fields.
+1. **One local file, two explicit formats.** `--format raw` (default during 0.1) and `--format jsonl`. JSON input supports bounded objects, nested fields, and top-level arrays of formatted objects; malformed objects remain available as raw records but have no parsed fields.
 2. **Streaming reader.** LF and CRLF, an unterminated final snapshot line, 64-bit offsets, reusable buffers, a 16 MiB maximum physical line, and deterministic handling of oversized lines. Heap usage must not grow with file size.
 3. **One field equality predicate.** `--filter "level=ERROR"`, with the documented missing-field behavior. Canonical JSON aliases for timestamp, level, and message are available. Compound expressions and inequality are deferred to 0.2.
 4. **One raw-line and one field regex.** `--regex "timeout"` and `--regex-field "message=timeout"` may be used together and are ANDed with the equality predicate. The internal engine supports the entire planned regular subset—literals, dot, classes and ranges, `\d`/`\w`/`\s`, anchors, `*`/`+`/`?`, grouping, and alternation—through an iterative NFA VM. Parentheses need grouping semantics in the MVP; exposing capture groups beyond the match span is not an MVP user feature. Regex size and work limits apply from the start.
@@ -72,7 +72,7 @@ The implementation adds `--follow`, `--from-start`, and `--flush-partial` for ba
 
 ## 0.5: terminal interface
 
-The `--tui` implementation provides a 256-row memory cache, temporary checkpoints, navigation and regex search across the full scan, error/warning jumps, context view, follow mode with append/partial-line/rotation handling, row highlighting, dynamic filter/raw-regex edits with a rescan, resize handling, help, and terminal restoration. Rows keep at most 1 KiB of display text; search is limited to each row's displayed preview. Broader terminal behavior remains. Unsupported non-interactive streams fail clearly; log control bytes are sanitized.
+The `--tui` implementation provides a 256-row memory cache, temporary checkpoints, navigation and regex search across the full scan, error/warning jumps, context view, scrollable full-record zoom, follow mode with append/partial-line/rotation handling, row highlighting, dynamic filter/raw-regex edits with a rescan, resize handling, help, and terminal restoration. Rows keep at most 1 KiB of display text; search is limited to each row's displayed preview. Broader terminal behavior remains. Unsupported non-interactive streams fail clearly; log control bytes are sanitized.
 
 **Gate:** Windows build and non-terminal rejection tests pass. The expanded Linux PTY scenario passes and exercises historical search, severity jumps, context, resize, invalid filter edits, bounded previews for long lines, terminal restoration, TUI follow appends, partial records, and rotation. Manual usability checks on Windows Terminal and macOS remain part of release validation.
 

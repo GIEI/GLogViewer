@@ -88,6 +88,8 @@ def main():
         dir=scratch_root,
     ) as temporary:
         root = Path(temporary)
+        sample_directory = Path(__file__).resolve().parents[1] / "SAMPLES"
+        tested_samples = set()
         check_reader_boundaries(binary, root)
 
         raw_file = root / "raw.log"
@@ -274,10 +276,10 @@ def main():
                          "--filter", "level=ERROR", "--stats")
         require(statistics.returncode == 0 and
                 b"Physical records: 8\n" in statistics.stdout and
-                b"Parsed records: 4\n" in statistics.stdout and
-                b"Rejected records: 4\n" in statistics.stdout and
-                b"Selected records: 3\n" in statistics.stdout and
-                b"  ERROR: 3\n" in statistics.stdout,
+                b"Parsed records: 5\n" in statistics.stdout and
+                b"Rejected records: 3\n" in statistics.stdout and
+                b"Selected records: 4\n" in statistics.stdout and
+                b"  ERROR: 4\n" in statistics.stdout,
                 "statistics should report exact record and selected-level counts")
         cardinality_file = root / "high-cardinality.jsonl"
         with cardinality_file.open("wb") as stream:
@@ -344,6 +346,7 @@ def main():
                 b'{"level":"INFO","message":"startup"}\n',
                 b'{"level":"ERROR","message":"connection timeout"}\n',
                 b'{"level":"WARN","message":"disk usage high"}\n',
+                b'{"level":"INFO","message":"second connection timeout"}\n',
             ]
             tui_records.extend(
                 ('{"level":"INFO","message":"filler %d"}\n' % number).encode("ascii")
@@ -373,14 +376,29 @@ def main():
                             except OSError:
                                 break
 
+                def read_until_count(needle, count, timeout):
+                    deadline = time.monotonic() + timeout
+                    while tui_output.count(needle) < count and tui_process.poll() is None and time.monotonic() < deadline:
+                        ready, _, _ = select.select([master_fd], [], [], 0.1)
+                        if ready:
+                            try:
+                                tui_output.extend(os.read(master_fd, 65536))
+                            except OSError:
+                                break
+
                 read_until(b"GLogViewer", 2)
                 read_until(b"Scan complete", 2)
                 os.write(master_fd, b"/")
                 read_until(b"\033[24;1H\033[2K/", 2)
                 os.write(master_fd, b"timeout\n")
                 read_until(b"Search: timeout", 2)
+                read_until(b"\033[7m       2", 2)
+                os.write(master_fd, b"\r")
+                read_until(b"\033[7m       4", 2)
+                os.write(master_fd, b"\x1b[13;2u")
+                read_until(b"\033[7m       2", 2)
                 os.write(master_fd, b"n")
-                read_until(b'2 {"level":"ERROR","message":"connection timeout"}', 2)
+                read_until(b"\033[7m       4", 2)
                 os.write(master_fd, b"w")
                 read_until(b'3 {"level":"WARN","message":"disk usage high"}', 2)
                 os.write(master_fd, b"c")
@@ -393,6 +411,22 @@ def main():
                 read_until(b"Filter: ", 2)
                 os.write(master_fd, b"(level=ERROR\n")
                 read_until(b"Invalid filter:", 2)
+                os.write(master_fd, b"f")
+                read_until(b"Filter: ", 2)
+                os.write(master_fd, b"level=ERROR\n")
+                read_until_count(b"Scan complete", 2, 3)
+                os.write(master_fd, b"r")
+                read_until(b"Regex: ", 2)
+                os.write(master_fd, b"timeout\n")
+                read_until_count(b"Scan complete", 3, 3)
+                os.write(master_fd, b"/")
+                read_until(b"\033[24;1H\033[2K/", 2)
+                os.write(master_fd, b"timeout\n")
+                read_until(b"Search: timeout", 2)
+                os.write(master_fd, b"C")
+                read_until(b"Scanning input", 2)
+                read_until(b"selected: 604", 3)
+                read_until_count(b"Scan complete", 4, 3)
                 os.write(master_fd, b"q")
                 try:
                     tui_process.wait(timeout=5)
@@ -443,6 +477,9 @@ def main():
                     "context view": b"Context around source line 3" in tui_output,
                     "resize redraw": b"\033[11;1H\033[2K" in tui_output,
                     "search status": b"Search: timeout" in tui_output,
+                    "enter search navigation": b"\033[7m       4" in tui_output,
+                    "shift-enter reverse navigation": b"\033[7m       2" in tui_output,
+                    "clear resets filters and search": b"selected: 604" in tui_output,
                     "invalid filter diagnostic": b"Invalid filter:" in tui_output,
                     "terminal mode restoration": terminal_restored,
                 }
@@ -460,6 +497,62 @@ def main():
                     tui_process.wait(timeout=5)
                 os.close(master_fd)
                 os.close(slave_fd)
+
+            (root / "tui_1.jsonl").write_text("existing export 1\n", encoding="utf-8")
+            (root / "tui_2.jsonl").write_text("existing export 2\n", encoding="utf-8")
+            tui_export = root / "tui_3.jsonl"
+            export_master, export_slave = pty.openpty()
+            fcntl.ioctl(export_slave, termios.TIOCSWINSZ,
+                        struct.pack("HHHH", 24, 100, 0, 0))
+            export_process = subprocess.Popen(
+                [str(binary), str(tui_file), "--format", "jsonl", "--tui"],
+                stdin=export_slave,
+                stdout=export_slave,
+                stderr=export_slave,
+                close_fds=True,
+                cwd=root,
+            )
+            export_output = bytearray()
+            try:
+                def export_read_until(needle, timeout):
+                    deadline = time.monotonic() + timeout
+                    while needle not in export_output and export_process.poll() is None and time.monotonic() < deadline:
+                        ready, _, _ = select.select([export_master], [], [], 0.1)
+                        if ready:
+                            try:
+                                export_output.extend(os.read(export_master, 65536))
+                            except OSError:
+                                break
+
+                export_read_until(b"Scan complete", 3)
+                export_output.clear()
+                os.write(export_master, b"f")
+                export_read_until(b"Filter: ", 2)
+                os.write(export_master, b"level=ERROR\n")
+                export_output.clear()
+                export_read_until(b"Scan complete", 3)
+                export_output.clear()
+                os.write(export_master, b"/")
+                export_read_until(b"\033[24;1H\033[2K/", 2)
+                os.write(export_master, b"timeout\n")
+                export_output.clear()
+                export_read_until(b"Search: timeout", 2)
+                export_output.clear()
+                os.write(export_master, b"x")
+                export_read_until(b"Export path (Enter for numbered default): ", 2)
+                os.write(export_master, b"\n")
+                export_read_until(b"Exported 1 record", 3)
+                os.write(export_master, b"q")
+                export_process.wait(timeout=5)
+                require(export_process.returncode == 0 and tui_export.read_bytes() ==
+                        b'{"level":"ERROR","message":"connection timeout"}\n',
+                        "blank TUI export path should create the next numbered file with filtered/search matches")
+            finally:
+                if export_process.poll() is None:
+                    export_process.kill()
+                    export_process.wait(timeout=5)
+                os.close(export_master)
+                os.close(export_slave)
 
             long_tui_file = root / "tui-long-line.jsonl"
             long_tui_file.write_bytes(b'{"level":"INFO","message":"' +
@@ -489,7 +582,8 @@ def main():
                 os.write(long_master, b"q")
                 long_process.wait(timeout=5)
                 require(long_process.returncode == 0 and
-                        b"[preview clipped]" in long_output,
+                        b"[preview clipped]" in long_output and
+                        b"[preview clipped]\x1b[0m\r\n" in long_output,
                         "TUI should display bounded previews for long records")
             finally:
                 if long_process.poll() is None:
@@ -556,7 +650,8 @@ def main():
         require(exported.returncode == 0 and text_export.read_bytes() ==
                 b'{"level":"ERROR","message":"connection timeout"}\n'
                 b'{"severity":"ERROR","msg":"timeout"}\n'
-                b'{"level":"ERROR","message":"other"}\n',
+                b'{"level":"ERROR","message":"other"}\n'
+                b'{"level":"ERROR","message":"nested","details":{"code":3}}\n',
                 "text export should preserve selected source records")
 
         csv_export = root / "selected.csv"
@@ -572,7 +667,9 @@ def main():
                 csv_rows[2] == ["3", "ERROR", "timeout",
                                 '{"severity":"ERROR","msg":"timeout"}'] and
                 csv_rows[3] == ["4", "ERROR", "other",
-                                '{"level":"ERROR","message":"other"}'],
+                                '{"level":"ERROR","message":"other"}'] and
+                csv_rows[4] == ["7", "ERROR", "nested",
+                                '{"level":"ERROR","message":"nested","details":{"code":3}}'],
                 "CSV export should add headers and serialize configured fields")
         protected = run(binary, str(json_file), "--format", "jsonl", "--export", "text",
                         "--output", str(text_export))
@@ -615,8 +712,129 @@ def main():
             multiline_rows = list(csv.reader(stream))
         require(multiline_rows == [["message"], ["first\nsecond"]],
                 "CSV should quote decoded line breaks inside fields")
-        require(b"skipped 4 invalid" in result.stderr,
-                "malformed, duplicate-key, nested, and invalid Unicode JSON should be counted")
+        json_diagnostics = run(binary, str(json_file), "--format", "jsonl")
+        require(b"skipped 3 invalid" in json_diagnostics.stderr,
+                "malformed, duplicate-key, and invalid Unicode JSON should be counted")
+
+        nested_json = root / "employees-formatted.json"
+        nested_records = [
+            b'{\n'
+            b'  "employee": {\n'
+            b'    "id": "E1",\n'
+            b'    "department": {"manager": {"contact": {"phone": "829-648-0859x1216"}}}\n'
+            b'  },\n'
+            b'  "projects": [{"projectId": "P1", "details": {"active": true}}],\n'
+            + b''.join(
+                ('  "history_%02d": "history item %02d",\n' %
+                 (number, number)).encode("ascii")
+                for number in range(35))
+            + b'  "zoomTail": "zoom-end-marker"\n'
+            + b'}',
+            b'{\n'
+            b'  "employee": {\n'
+            b'    "id": "E2",\n'
+            b'    "department": {"manager": {"contact": {"phone": "716.512.1322x0504"}}}\n'
+            b'  }\n'
+            b'}',
+        ]
+        nested_json.write_bytes(b'[\n' + b',\n'.join(nested_records) + b'\n]\n')
+        nested_match = run(binary, str(nested_json), "--format", "jsonl",
+                           "--regex-field", "phone=^829")
+        require(nested_match.returncode == 0 and
+                nested_match.stdout == nested_records[0] + b"\n",
+                "multiline JSON arrays should emit objects and search nested leaf fields")
+        nested_path_match = run(binary, str(nested_json), "--format", "jsonl",
+                                "--filter", "employee.department.manager.contact.phone~^829")
+        require(nested_path_match.returncode == 0 and
+                nested_path_match.stdout == nested_records[0] + b"\n",
+                "nested JSON field paths should be available to compound filters")
+        nested_auto = run(binary, str(nested_json), "--format", "auto",
+                           "--regex-field", "employee.department.manager.contact.phone=^829")
+        require(nested_auto.returncode == 0 and
+                nested_auto.stdout == nested_records[0] + b"\n",
+                "format detection should recognize a formatted JSON array")
+        nested_csv = root / "nested-fields.csv"
+        nested_export = run(binary, str(nested_json), "--format", "jsonl",
+                            "--regex-field", "phone=^829", "--export", "csv",
+                            "--output", str(nested_csv), "--columns",
+                            "line_number,employee.department.manager.contact.phone")
+        require(nested_export.returncode == 0,
+                "CSV export should accept nested JSON field paths")
+        with nested_csv.open("r", encoding="utf-8", newline="") as stream:
+            nested_csv_rows = list(csv.reader(stream))
+        require(nested_csv_rows == [
+            ["line_number", "employee.department.manager.contact.phone"],
+            ["2", "829-648-0859x1216"],
+        ], "nested JSON CSV columns should preserve values and source line numbers")
+        if os.name != "nt":
+            nested_master, nested_slave = pty.openpty()
+            fcntl.ioctl(nested_slave, termios.TIOCSWINSZ,
+                        struct.pack("HHHH", 24, 120, 0, 0))
+            nested_tui = subprocess.Popen(
+                [str(binary), str(nested_json), "--format", "jsonl",
+                 "--regex-field", "phone=^829", "--tui"],
+                stdin=nested_slave,
+                stdout=nested_slave,
+                stderr=nested_slave,
+                close_fds=True,
+            )
+            nested_tui_output = bytearray()
+            try:
+                def nested_read_until(needle, timeout, start=0):
+                    deadline = time.monotonic() + timeout
+                    while needle not in nested_tui_output[start:] and \
+                            nested_tui.poll() is None and time.monotonic() < deadline:
+                        ready, _, _ = select.select([nested_master], [], [], 0.1)
+                        if ready:
+                            try:
+                                nested_tui_output.extend(os.read(nested_master, 65536))
+                            except OSError:
+                                break
+
+                deadline = time.monotonic() + 5
+                while b"Scan complete" not in nested_tui_output and \
+                        nested_tui.poll() is None and time.monotonic() < deadline:
+                    ready, _, _ = select.select([nested_master], [], [], 0.1)
+                    if ready:
+                        try:
+                            nested_tui_output.extend(os.read(nested_master, 65536))
+                        except OSError:
+                            break
+                os.write(nested_master, b"z")
+                nested_read_until(b"Record zoom | source line 2", 2)
+                idle_output_start = len(nested_tui_output)
+                idle_deadline = time.monotonic() + 0.4
+                while time.monotonic() < idle_deadline and nested_tui.poll() is None:
+                    ready, _, _ = select.select([nested_master], [], [], 0.05)
+                    if ready:
+                        try:
+                            nested_tui_output.extend(os.read(nested_master, 65536))
+                        except OSError:
+                            break
+                require(b"\x1b[2J" not in nested_tui_output[idle_output_start:],
+                        "zoom view should not redraw while idle")
+                os.write(nested_master, b"\x1b[F")
+                nested_read_until(b"zoom-end-marker", 2)
+                os.write(nested_master, b"\x1b[H")
+                nested_read_until(b"829-648-0859x1216", 2)
+                restore_output_start = len(nested_tui_output)
+                os.write(nested_master, b"\x1b")
+                nested_read_until(b"Search: (none)", 2, restore_output_start)
+                os.write(nested_master, b"q")
+                nested_tui.wait(timeout=5)
+                require(nested_tui.returncode == 0 and
+                        b"selected: 1" in nested_tui_output and
+                        b"829-648-0859x1216" in nested_tui_output and
+                        b'"employee": { "id": "E1"' in nested_tui_output and
+                        b"Record zoom | source line 2" in nested_tui_output and
+                        b"zoom-end-marker" in nested_tui_output,
+                        "TUI should display the multiline JSON record matching a nested phone field")
+            finally:
+                if nested_tui.poll() is None:
+                    nested_tui.kill()
+                    nested_tui.wait(timeout=5)
+                os.close(nested_master)
+                os.close(nested_slave)
 
         access_file = root / "access.log"
         access_line = (
@@ -806,6 +1024,7 @@ def main():
             require(elapsed < 30.0,
                     "the 100 MB enwik8 streaming smoke scan exceeded 30 seconds")
             print("enwik8: scanned 100 MB in {:.2f}s".format(elapsed))
+            tested_samples.add(sample.resolve())
         else:
             print("enwik8: skipped because SAMPLES/enwik8 is not present")
 
@@ -829,6 +1048,7 @@ def main():
                     "the 1 GB syslog streaming regression exceeded 60 seconds")
             print("Linux_1GB.syslog: parsed {:.2f} GB in {:.2f}s".format(
                 large_syslog.stat().st_size / 1_000_000_000, elapsed))
+            tested_samples.add(large_syslog.resolve())
         else:
             print("Linux_1GB.syslog: skipped because the local sample is not present")
 
@@ -853,8 +1073,35 @@ def main():
                     "the 500 MB HTTP access streaming regression exceeded 60 seconds")
             print("http_access_500MB.log: scanned {:.2f} GB in {:.2f}s".format(
                 http_sample.stat().st_size / 1_000_000_000, elapsed))
+            tested_samples.add(http_sample.resolve())
         else:
             print("http_access_500MB.log: skipped because the local sample is not present")
+
+        if sample_directory.is_dir():
+            sample_files = sorted(path for path in sample_directory.rglob("*")
+                                  if path.is_file())
+            for sample_path in sample_files:
+                if sample_path.resolve() in tested_samples:
+                    continue
+                print("Scanning additional sample: {} ({} bytes)".format(
+                    sample_path.relative_to(sample_directory),
+                    sample_path.stat().st_size), flush=True)
+                started = time.perf_counter()
+                sample_result = run(binary, str(sample_path), "--format", "raw",
+                                    "--filter", "missing=value")
+                elapsed = time.perf_counter() - started
+                require(sample_result.returncode == 1,
+                        "sample should complete a full raw scan with no matches: {}".format(
+                            sample_path))
+                require(sample_result.stdout == b"",
+                        "unmatched sample scan should not write records: {}".format(
+                            sample_path))
+                print("Scanned {} in {:.2f}s".format(
+                    sample_path.relative_to(sample_directory), elapsed), flush=True)
+            print("Scanned all {} regular file(s) in SAMPLES".format(
+                len(sample_files)), flush=True)
+        else:
+            print("SAMPLES directory is not present; sample scans were skipped", flush=True)
 
     print("All GLogViewer CLI checks passed.")
 

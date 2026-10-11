@@ -352,6 +352,24 @@ InputFormat parser_detect_format(const unsigned char *const *lines,
     size_t best_index = 0;
     size_t index;
     for (index = 0; index < count; index++) {
+        size_t position = 0;
+        while (position < lengths[index] &&
+               (lines[index][position] == ' ' || lines[index][position] == '\t' ||
+                lines[index][position] == '\r')) position++;
+        if (position == lengths[index]) continue;
+        if (lines[index][position] == '[') return FORMAT_JSONL;
+        if (lines[index][position] == '{') {
+            size_t end = lengths[index];
+            while (end > position &&
+                   (lines[index][end - 1] == ' ' || lines[index][end - 1] == '\t' ||
+                    lines[index][end - 1] == '\r')) end--;
+            if (end == position + 1 || lines[index][end - 1] != '}') {
+                return FORMAT_JSONL;
+            }
+        }
+        break;
+    }
+    for (index = 0; index < count; index++) {
         LogEntry entry;
         size_t candidate;
         entry.raw.data = lines[index];

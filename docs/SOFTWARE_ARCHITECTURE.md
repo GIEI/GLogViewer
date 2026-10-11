@@ -33,7 +33,7 @@ flowchart LR
 | `format_detect` | Bounded sample and confidence scoring | Chooses a preset or raw mode. |
 | `parser_syslog` | Distinct RFC 3164-like and RFC 5424 parsers | Fills normalized fields without changing raw data. |
 | `parser_http` | Apache Common/Combined and NGINX Combined parsers | Fills access-specific fields. |
-| `parser_jsonl` | Bounded top-level JSON-object subset | Decodes strings into reusable scratch memory. |
+| `parser_jsonl` | Bounded JSON objects, nested objects/arrays, and object arrays | Decodes strings into reusable scratch memory; exposes nested fields as dotted paths and leaf aliases. |
 | `parser_custom` | Compile and run placeholder patterns | Produces canonical aliases and named fields. |
 | `regex_compile` | Lex and parse supported regex into AST; reject invalid syntax | Emits immutable NFA program and capture metadata. |
 | `regex_vm` | Iterative NFA matching and match spans | Reads byte slices; enforces state and work limits. |
