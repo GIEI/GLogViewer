@@ -15,6 +15,7 @@ Release process validation pre-release.
 - Windows, Linux, and macOS CI suites pass, including release archive checks.
 - Linux AddressSanitizer and UndefinedBehaviorSanitizer checks pass.
 - Windows 1 GiB warm-cache benchmark median: 0.679 seconds; peak RSS: 4.14 MiB.
+- The tagged release workflow published Windows, Linux, and macOS archives with a SHA-256 manifest.
 
 ## 0.5.0-alpha.1
 
