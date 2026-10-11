@@ -398,6 +398,8 @@ int parser_custom_validate(const char *pattern, char *error,
 {
     const char *cursor = pattern;
     int captures = 0;
+    char aliases[LOGVIEW_MAX_FIELDS][128];
+    size_t alias_count = 0;
     if (pattern == NULL || *pattern == '\0') {
         snprintf(error, error_capacity, "custom pattern cannot be empty");
         return 0;
@@ -432,12 +434,25 @@ int parser_custom_validate(const char *pattern, char *error,
             if (colon != NULL) {
                 const char *alias = colon + 1;
                 const char *scan;
+                size_t alias_length = (size_t)(end - alias);
+                size_t alias_index;
                 if (alias == end || !((*alias >= 'A' && *alias <= 'Z') ||
                     (*alias >= 'a' && *alias <= 'z') || *alias == '_')) goto invalid;
                 for (scan = alias + 1; scan < end; scan++) {
                     if (!( (*scan >= 'A' && *scan <= 'Z') || (*scan >= 'a' && *scan <= 'z') ||
                            (*scan >= '0' && *scan <= '9') || *scan == '_')) goto invalid;
                 }
+                if (alias_length >= sizeof(aliases[0]) ||
+                    alias_count >= LOGVIEW_MAX_FIELDS) goto invalid;
+                for (alias_index = 0; alias_index < alias_count; alias_index++) {
+                    if (strlen(aliases[alias_index]) == alias_length &&
+                        memcmp(aliases[alias_index], alias, alias_length) == 0) {
+                        goto invalid;
+                    }
+                }
+                memcpy(aliases[alias_count], alias, alias_length);
+                aliases[alias_count][alias_length] = '\0';
+                alias_count++;
             }
             if (is_message) {
                 if (end[1] != '\0') goto invalid;

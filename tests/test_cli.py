@@ -211,6 +211,26 @@ def main():
             require(rotation_output == b"new generation\n" and rotation_error == b"",
                     "follow should reopen a rotated file at its beginning")
 
+            reopen_file = root / "follow-reopen.log"
+            reopen_old = root / "follow-reopen.old"
+            reopen_file.write_bytes(b"")
+            reopen_process = subprocess.Popen(
+                [str(binary), "--follow", str(reopen_file)],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+            try:
+                time.sleep(0.3)
+                os.replace(reopen_file, reopen_old)
+                time.sleep(0.4)
+                reopen_file.write_bytes(b"reopened generation\n")
+                time.sleep(0.6)
+            finally:
+                reopen_process.terminate()
+                reopen_output, reopen_error = reopen_process.communicate(timeout=5)
+            require(reopen_output == b"reopened generation\n" and reopen_error == b"",
+                    "follow should recover when a rotated path is temporarily missing")
+
             flush_file = root / "follow-flush.log"
             flush_file.write_bytes(b"")
             flush_process = subprocess.Popen(
@@ -1096,6 +1116,17 @@ def main():
                      "--filter", 'request="GET /index.html HTTP/1.1"')
         require(result.returncode == 0 and result.stdout == access_line,
                 "auto detection should identify a consistent access log")
+        escaped_access_line = (
+            b'203.0.113.8 - alice [10/Oct/2000:13:55:36 -0700] '
+            b'"GET /quoted HTTP/1.1" 200 12 "-" '
+            b'"Mozilla/5.0 \\"quoted\\" agent"\n'
+        )
+        access_file.write_bytes(escaped_access_line)
+        escaped_access = run(binary, str(access_file), "--format", "apache-combined",
+                             "--regex-field", "user_agent=quoted")
+        require(escaped_access.returncode == 0 and
+                escaped_access.stdout == escaped_access_line,
+                "Apache Combined parsing should accept escaped quotes in quoted fields")
         common_line = (
             b'203.0.113.8 - alice [10/Oct/2000:13:55:36 -0700] '
             b'"GET / HTTP/1.1" 204 0\n'
@@ -1113,6 +1144,10 @@ def main():
                      "--filter", "pid=1234")
         require(result.returncode == 0 and result.stdout == syslog3164,
                 "RFC 3164 parsing should extract the process ID")
+        result = run(binary, str(syslog_file), "--format", "syslog3164",
+                     "--filter", 'timestamp="Oct 11 22:14:15" and host=mymachine')
+        require(result.returncode == 0 and result.stdout == syslog3164,
+                "RFC 3164 should preserve its timestamp without inventing a year")
         result = run(binary, str(syslog_file), "--format", "auto",
                      "--filter", "process=su")
         require(result.returncode == 0 and result.stdout == syslog3164,
@@ -1127,9 +1162,19 @@ def main():
         syslog5424 = b"<34>1 2003-10-11T22:14:15.003Z mymachine su 123 ID47 [exampleSDID@32473 iut=\"3\" detail=\"left\\]right\"] BOMAn application event log entry\n"
         syslog_file.write_bytes(syslog5424)
         result = run(binary, str(syslog_file), "--format", "syslog5424",
-                     "--filter", "level=CRIT")
+                     "--filter", 'level=CRIT and structured_data~"detail"')
         require(result.returncode == 0 and result.stdout == syslog5424,
-                "RFC 5424 should extract severity from PRI")
+                "RFC 5424 should extract severity and retain structured data")
+        malformed_syslog = (
+            b'<34>1 2003-10-11T22:14:15.003Z mymachine su 123 ID47 '
+            b'[exampleSDID@32473 iut="unterminated] event\n'
+        )
+        syslog_file.write_bytes(malformed_syslog)
+        malformed_syslog_result = run(binary, str(syslog_file), "--format", "syslog5424",
+                                      "--filter", "process=su")
+        require(malformed_syslog_result.returncode == 1 and
+                b"skipped 1 invalid or oversized record(s)" in malformed_syslog_result.stderr,
+                "malformed RFC 5424 structured data should be rejected and counted")
 
         custom_line = b"2025-01-02 ERROR disk timeout\n"
         custom_file = root / "custom.log"
@@ -1143,6 +1188,11 @@ def main():
                              "--pattern", "%{LEVEL}%{MESSAGE}")
         require(invalid_custom.returncode == 3,
                 "ambiguous adjacent custom placeholders should be rejected")
+        duplicate_custom = run(
+            binary, str(custom_file), "--format", "custom",
+            "--pattern", "%{TIMESTAMP:x} %{LEVEL:x} %{MESSAGE}")
+        require(duplicate_custom.returncode == 3,
+                "custom patterns should reject duplicate field aliases")
 
         malformed_file = root / "malformed.jsonl"
         malformed_file.write_bytes(b'{"message":"raw fallback match",}\n')

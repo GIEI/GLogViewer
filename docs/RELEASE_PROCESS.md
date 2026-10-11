@@ -8,6 +8,12 @@ Before tagging a release:
 2. Confirm the version printed by `logview --version` matches the tag without its leading `v`.
 3. Confirm the 1.0 acceptance gates in the [roadmap](ROADMAP.md) are complete before creating the stable `v1.0.0` tag.
 
-Push the version tag to trigger the release workflow. The workflow builds and tests Windows, Linux, and macOS packages, checks the binary version against the tag, runs Linux AddressSanitizer and UndefinedBehaviorSanitizer checks, then creates a GitHub release with the platform archives and `SHA256SUMS.txt`. Tags containing a hyphen, such as `v0.9.0-rc.1`, are published as prereleases. Tags without a prerelease suffix, such as `v1.0.0`, are published as stable releases.
+Push the version tag to trigger the release workflow. The workflow builds and tests Windows, Linux, and macOS packages, checks the binary version against the tag, runs Linux AddressSanitizer and UndefinedBehaviorSanitizer checks, creates `SHA256SUMS.txt`, generates GitHub artifact attestations for the release assets, then publishes the GitHub release. Tags containing a hyphen, such as `v0.9.0-rc.1`, are published as prereleases. Tags without a prerelease suffix, such as `v1.0.0`, are published as stable releases.
 
-Each archive contains the executable, README, license, changelog, and user manual. Linux and macOS archives retain executable permission. GitHub also provides source archives for the tagged commit. The SHA-256 file verifies downloaded assets against accidental corruption; it is not a digital signature.
+Each archive contains the executable, README, license, changelog, and user manual. Linux and macOS archives retain executable permission. GitHub also provides source archives for the tagged commit. The SHA-256 file detects accidental corruption. Artifact attestations provide signed build provenance for the release assets; verify a downloaded archive with GitHub CLI:
+
+```sh
+gh attestation verify logview-linux-x86_64.tar.gz --repo GIEI/GLogViewer
+```
+
+Use the matching downloaded archive path on Windows and macOS. Verification requires a supported GitHub CLI version and an online connection.
