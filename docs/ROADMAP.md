@@ -1,6 +1,6 @@
 # Roadmap to Version 1.0
 
-**Status:** release plan, 2026-10-11. The 0.1–0.5 milestones are implemented. The CLI suite is reported passing on Windows, Linux, and macOS; the expanded Linux PTY suite has passed. The GitHub Actions matrix passes on Windows, Linux, and macOS, and the Linux sanitizer job passes. The formal 1 GiB warm-cache benchmark passed on the Windows reference machine; broader release hardening remains. See [validation notes](VALIDATION.md). This roadmap stages the [1.0 technical contract](TECHNICAL_SPECIFICATION.md).
+**Status:** release plan, 2026-10-11. The 0.1–0.5 milestones are implemented. The CLI suite is reported passing on Windows, Linux, and macOS; the expanded Linux PTY suite has passed. The GitHub Actions matrix passes on Windows, Linux, and macOS, and the Linux sanitizer job passes. The formal 1 GiB warm-cache benchmark passed on the Windows reference machine. CI now packages all three platforms and is configured to publish validated archives and checksums for version tags; the release workflow still needs a tagged end-to-end run. Broader release hardening remains. See [validation notes](VALIDATION.md). This roadmap stages the [1.0 technical contract](TECHNICAL_SPECIFICATION.md).
 
 ## Product decision
 

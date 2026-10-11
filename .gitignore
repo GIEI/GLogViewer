@@ -56,3 +56,5 @@ SAMPLES/
 
 # Build output
 build/
+dist/
+__pycache__/

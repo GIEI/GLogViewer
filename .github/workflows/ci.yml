@@ -19,10 +19,13 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os:
-          - windows-2025
-          - ubuntu-24.04
-          - macos-15
+        include:
+          - os: windows-2025
+            platform: windows
+          - os: ubuntu-24.04
+            platform: linux
+          - os: macos-15
+            platform: macos
 
     steps:
       - name: Check out source
@@ -40,10 +43,51 @@ jobs:
           .\build.bat
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           python tests\test_cli.py build\logview.exe
+          if ($env:GITHUB_REF -like 'refs/tags/v*') {
+            $expectedVersion = "logview $($env:GITHUB_REF_NAME.Substring(1))"
+            $actualVersion = (& build\logview.exe --version).Trim()
+            if ($LASTEXITCODE -ne 0 -or $actualVersion -ne $expectedVersion) {
+              throw "Tag version $expectedVersion does not match binary version $actualVersion"
+            }
+          }
 
       - name: Build and test on macOS and Linux
         if: runner.os != 'Windows'
-        run: make clean && make test
+        run: |
+          make clean && make test
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+            expected_version="logview ${GITHUB_REF_NAME#v}"
+            actual_version="$(build/logview --version)"
+            if [[ "$actual_version" != "$expected_version" ]]; then
+              echo "Tag version $expected_version does not match binary version $actual_version" >&2
+              exit 1
+            fi
+          fi
+
+      - name: Package release archive on Windows
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: >-
+          python tests\package_release.py build\logview.exe
+          --platform windows --output-directory dist
+
+      - name: Package release archive on macOS and Linux
+        if: runner.os != 'Windows'
+        run: >-
+          python3 tests/package_release.py build/logview
+          --platform "${{ matrix.platform }}"
+          --output-directory dist
+
+      - name: Test release archive packaging
+        run: python tests/test_package_release.py
+
+      - name: Upload release archive
+        uses: actions/upload-artifact@v7
+        with:
+          name: release-package-${{ matrix.os }}
+          path: dist/*
+          if-no-files-found: error
+          retention-days: 14
 
       - name: Smoke-test release benchmark on Windows
         if: runner.os == 'Windows'
@@ -85,3 +129,32 @@ jobs:
           CFLAGS="-std=c99 -O1 -g -Wall -Wextra -Wpedantic
           -fsanitize=address,undefined -fno-omit-frame-pointer"
           test
+
+  publish-release:
+    name: Publish tagged release
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs:
+      - build-and-test
+      - sanitizer
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - name: Download platform release archives
+        uses: actions/download-artifact@v7
+        with:
+          pattern: release-package-*
+          path: release-assets
+          merge-multiple: true
+
+      - name: Create checksums and publish GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          sha256sum release-assets/* > release-assets/SHA256SUMS.txt
+          gh release create "$RELEASE_TAG" release-assets/* \
+            --verify-tag \
+            --title "GLogViewer $RELEASE_TAG" \
+            --generate-notes
