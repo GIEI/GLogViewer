@@ -406,11 +406,6 @@ def main():
                 os.write(master_fd, b"w")
                 read_until(b'3 {"level":"WARN","message":"disk usage high"}',
                            2, warning_output_start)
-                context_output_start = len(tui_output)
-                os.write(master_fd, b"c")
-                read_until(b"Context around source line 3", 2, context_output_start)
-                read_until(b'2 {"level":"ERROR","message":"connection timeout"}',
-                           2, context_output_start)
                 fcntl.ioctl(master_fd, termios.TIOCSWINSZ,
                             struct.pack("HHHH", 12, 60, 0, 0))
                 read_until(b"\033[11;1H\033[2K", 2)
@@ -427,7 +422,7 @@ def main():
                 os.write(master_fd, b"timeout\n")
                 read_until_count(b"Scan complete", 3, 3)
                 os.write(master_fd, b"/")
-                read_until(b"\033[11;1H\033[2K/", 2)
+                read_until(b"\033[12;1H\033[2K/", 2)
                 os.write(master_fd, b"timeout\n")
                 read_until(b"Search: timeout", 2)
                 os.write(master_fd, b"C")
@@ -494,7 +489,6 @@ def main():
                     "search result": b"connection timeout" in tui_output,
                     "error navigation": b'2 {"level":"ERROR","message":"connection timeout"}' in tui_output,
                     "warning navigation": b'3 {"level":"WARN","message":"disk usage high"}' in tui_output,
-                    "context view": b"Context around source line 3" in tui_output,
                     "resize redraw": b"\033[11;1H\033[2K" in tui_output,
                     "search status": b"Search: timeout" in tui_output,
                     "enter search navigation": b"\033[7m       4" in tui_output,
@@ -515,6 +509,59 @@ def main():
                     tui_process.wait(timeout=5)
                 os.close(master_fd)
                 os.close(slave_fd)
+
+            context_master, context_slave = pty.openpty()
+            fcntl.ioctl(context_slave, termios.TIOCSWINSZ,
+                        struct.pack("HHHH", 24, 100, 0, 0))
+            context_process = subprocess.Popen(
+                [str(binary), str(tui_file), "--format", "jsonl", "--tui"],
+                stdin=context_slave,
+                stdout=context_slave,
+                stderr=context_slave,
+                close_fds=True,
+            )
+            context_output = bytearray()
+            try:
+                def context_read_until(needle, timeout, start=0):
+                    deadline = time.monotonic() + timeout
+                    while needle not in context_output[start:] and \
+                            context_process.poll() is None and time.monotonic() < deadline:
+                        ready, _, _ = select.select([context_master], [], [], 0.1)
+                        if ready:
+                            try:
+                                context_output.extend(os.read(context_master, 65536))
+                            except OSError:
+                                break
+
+                context_read_until(b"Scan complete", 3)
+                selection_start = len(context_output)
+                os.write(context_master, b"\x1b[H")
+                context_read_until(b"\033[7m       1", 2, selection_start)
+                selection_start = len(context_output)
+                os.write(context_master, b"\x1b[B")
+                context_read_until(b"\033[7m       2", 2, selection_start)
+                selection_start = len(context_output)
+                os.write(context_master, b"\x1b[B")
+                context_read_until(b"\033[7m       3", 2, selection_start)
+                context_start = len(context_output)
+                os.write(context_master, b"c")
+                context_read_until(b"Context around source line 3", 2, context_start)
+                context_read_until(b'2 {"level":"ERROR","message":"connection timeout"}',
+                                   2, context_start)
+                os.write(context_master, b"q")
+                context_process.wait(timeout=3)
+                require(context_process.returncode == 0 and
+                        b"Context around source line 3" in context_output[context_start:] and
+                        b'2 {"level":"ERROR","message":"connection timeout"}' in
+                        context_output[context_start:],
+                        "TUI context view should show physical records around the selected row; "
+                        "output={!r}".format(bytes(context_output[context_start:])))
+            finally:
+                if context_process.poll() is None:
+                    context_process.kill()
+                    context_process.wait(timeout=5)
+                os.close(context_master)
+                os.close(context_slave)
 
             navigation_file = root / "tui-search-navigation.jsonl"
             navigation_file.write_bytes(b"".join(
