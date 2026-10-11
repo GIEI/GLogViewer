@@ -1,5 +1,21 @@
 # GLogViewer Changelog
 
+## 0.5.0-alpha.2
+
+Release process validation pre-release.
+
+### Included
+
+- Automated Windows, Linux, and macOS release archives containing the executable and user documentation.
+- SHA-256 checksums for release assets and automatic prerelease labeling for version tags with a suffix.
+- Expanded Unicode validation for JSON escapes, UTF-8 input, surrogate pairs, and CSV output.
+
+### Validation
+
+- Windows, Linux, and macOS CI suites pass, including release archive checks.
+- Linux AddressSanitizer and UndefinedBehaviorSanitizer checks pass.
+- Windows 1 GiB warm-cache benchmark median: 0.679 seconds; peak RSS: 4.14 MiB.
+
 ## 0.5.0-alpha.1
 
 First public pre-release of GLogViewer.

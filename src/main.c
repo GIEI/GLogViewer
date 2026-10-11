@@ -20,7 +20,7 @@
 #include <windows.h>
 #endif
 
-#define LOGVIEW_VERSION "0.5.0-alpha.1"
+#define LOGVIEW_VERSION "0.5.0-alpha.2"
 #define FIELD_NAME_CAPACITY 256
 
 typedef struct {
