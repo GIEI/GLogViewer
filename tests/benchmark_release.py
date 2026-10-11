@@ -151,7 +151,20 @@ def scan_once(binary, fixture):
     return {"elapsed_seconds": elapsed, "peak_rss_bytes": peak_rss_bytes}
 
 
-def build_report(args, fixture, fixture_size, warmup, runs):
+def get_binary_version(binary):
+    result = subprocess.run(
+        [str(binary), "--version"],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        check=False,
+    )
+    version = result.stdout.decode("utf-8", errors="replace").strip()
+    if result.returncode != 0 or not version.startswith("logview "):
+        raise RuntimeError("Could not read logview version: " + version)
+    return version
+
+
+def build_report(args, binary, version, fixture, fixture_size, warmup, runs):
     median_seconds = statistics.median(
         item["elapsed_seconds"] for item in runs
     )
@@ -172,6 +185,7 @@ def build_report(args, fixture, fixture_size, warmup, runs):
         "logical_cpu_count": os.cpu_count(),
         "storage_details": args.storage_details,
         "binary": str(args.binary.resolve()),
+        "version": version,
         "build_details": args.build_details,
         "input_path": str(fixture.resolve()),
         "input_size_bytes": fixture_size,
@@ -200,20 +214,21 @@ def main():
     binary = args.binary.resolve()
     if not binary.is_file():
         raise SystemExit("Executable not found: " + str(binary))
+    version = get_binary_version(binary)
 
     fixture_root = Path("build") / "release-benchmark"
     fixture_root.mkdir(parents=True, exist_ok=True)
     if args.keep_fixture:
         fixture = fixture_root / "fixture-{}-bytes.log".format(args.size_bytes)
         fixture_size = write_fixture(fixture, args.size_bytes)
-        report = run_benchmark(args, binary, fixture, fixture_size)
+        report = run_benchmark(args, binary, version, fixture, fixture_size)
     else:
         with tempfile.TemporaryDirectory(
             prefix="glogviewer-benchmark-", dir=fixture_root
         ) as temporary:
             fixture = Path(temporary) / "fixture.log"
             fixture_size = write_fixture(fixture, args.size_bytes)
-            report = run_benchmark(args, binary, fixture, fixture_size)
+            report = run_benchmark(args, binary, version, fixture, fixture_size)
 
     rendered = json.dumps(report, indent=2, sort_keys=True)
     print(rendered)
@@ -227,14 +242,14 @@ def main():
     return 0
 
 
-def run_benchmark(args, binary, fixture, fixture_size):
+def run_benchmark(args, binary, version, fixture, fixture_size):
     print("Warmup scan", file=sys.stderr)
     warmup = scan_once(binary, fixture)
     runs = []
     for index in range(args.runs):
         print("Measured scan {}/{}".format(index + 1, args.runs), file=sys.stderr)
         runs.append(scan_once(binary, fixture))
-    return build_report(args, fixture, fixture_size, warmup, runs)
+    return build_report(args, binary, version, fixture, fixture_size, warmup, runs)
 
 
 if __name__ == "__main__":
