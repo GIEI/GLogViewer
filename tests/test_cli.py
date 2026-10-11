@@ -366,9 +366,9 @@ def main():
             )
             tui_output = bytearray()
             try:
-                def read_until(needle, timeout):
+                def read_until(needle, timeout, start=0):
                     deadline = time.monotonic() + timeout
-                    while needle not in tui_output and tui_process.poll() is None and time.monotonic() < deadline:
+                    while needle not in tui_output[start:] and tui_process.poll() is None and time.monotonic() < deadline:
                         ready, _, _ = select.select([master_fd], [], [], 0.1)
                         if ready:
                             try:
@@ -393,17 +393,24 @@ def main():
                 os.write(master_fd, b"timeout\n")
                 read_until(b"Search: timeout", 2)
                 read_until(b"\033[7m       2", 2)
+                enter_output_start = len(tui_output)
                 os.write(master_fd, b"\r")
-                read_until(b"\033[7m       4", 2)
+                read_until(b"\033[7m       4", 2, enter_output_start)
+                reverse_output_start = len(tui_output)
                 os.write(master_fd, b"\x1b[13;2u")
-                read_until(b"\033[7m       2", 2)
+                read_until(b"\033[7m       2", 2, reverse_output_start)
+                next_output_start = len(tui_output)
                 os.write(master_fd, b"n")
-                read_until(b"\033[7m       4", 2)
+                read_until(b"\033[7m       4", 2, next_output_start)
+                warning_output_start = len(tui_output)
                 os.write(master_fd, b"w")
-                read_until(b'3 {"level":"WARN","message":"disk usage high"}', 2)
+                read_until(b'3 {"level":"WARN","message":"disk usage high"}',
+                           2, warning_output_start)
+                context_output_start = len(tui_output)
                 os.write(master_fd, b"c")
-                read_until(b"Context around source line 3", 2)
-                read_until(b'2 {"level":"ERROR","message":"connection timeout"}', 2)
+                read_until(b"Context around source line 3", 2, context_output_start)
+                read_until(b'2 {"level":"ERROR","message":"connection timeout"}',
+                           2, context_output_start)
                 fcntl.ioctl(master_fd, termios.TIOCSWINSZ,
                             struct.pack("HHHH", 12, 60, 0, 0))
                 read_until(b"\033[11;1H\033[2K", 2)
@@ -420,7 +427,7 @@ def main():
                 os.write(master_fd, b"timeout\n")
                 read_until_count(b"Scan complete", 3, 3)
                 os.write(master_fd, b"/")
-                read_until(b"\033[24;1H\033[2K/", 2)
+                read_until(b"\033[11;1H\033[2K/", 2)
                 os.write(master_fd, b"timeout\n")
                 read_until(b"Search: timeout", 2)
                 os.write(master_fd, b"C")
@@ -469,6 +476,19 @@ def main():
                     restored_terminal[6][termios.VMIN] == original_terminal[6][termios.VMIN] and
                     restored_terminal[6][termios.VTIME] == original_terminal[6][termios.VTIME]
                 )
+                changed_terminal_fields = []
+                if (restored_terminal[0] & (termios.IXON | termios.ICRNL)) != \
+                        (original_terminal[0] & (termios.IXON | termios.ICRNL)):
+                    changed_terminal_fields.append((0, original_terminal[0], restored_terminal[0]))
+                if (restored_terminal[3] & (termios.ICANON | termios.ECHO)) != \
+                        (original_terminal[3] & (termios.ICANON | termios.ECHO)):
+                    changed_terminal_fields.append((3, original_terminal[3], restored_terminal[3]))
+                if restored_terminal[6][termios.VMIN] != original_terminal[6][termios.VMIN]:
+                    changed_terminal_fields.append(("VMIN", original_terminal[6][termios.VMIN],
+                                                    restored_terminal[6][termios.VMIN]))
+                if restored_terminal[6][termios.VTIME] != original_terminal[6][termios.VTIME]:
+                    changed_terminal_fields.append(("VTIME", original_terminal[6][termios.VTIME],
+                                                    restored_terminal[6][termios.VTIME]))
                 tui_checks = {
                     "normal exit": tui_process.returncode == 0,
                     "search result": b"connection timeout" in tui_output,
@@ -487,9 +507,7 @@ def main():
                 require(not failed_checks,
                         "TUI PTY checks failed: {}; terminal fields changed: {}; output tail={!r}".format(
                             failed_checks,
-                            [(index, original_terminal[index], restored_terminal[index])
-                             for index in range(len(original_terminal))
-                             if original_terminal[index] != restored_terminal[index]],
+                            changed_terminal_fields,
                             bytes(tui_output[-1200:])))
             finally:
                 if tui_process.poll() is None:
