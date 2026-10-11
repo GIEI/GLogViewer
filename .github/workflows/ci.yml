@@ -20,16 +20,16 @@ jobs:
       fail-fast: false
       matrix:
         os:
-          - windows-latest
-          - ubuntu-latest
-          - macos-latest
+          - windows-2025
+          - ubuntu-24.04
+          - macos-15
 
     steps:
       - name: Check out source
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v7
         with:
           python-version: "3.x"
 
