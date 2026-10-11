@@ -53,7 +53,11 @@ def create_package(binary, output_directory, target_platform, architecture):
     else:
         with tarfile.open(archive, "w:gz") as package:
             for source, name in files:
-                package.add(source, arcname=name)
+                metadata = package.gettarinfo(str(source), arcname=name)
+                if name == executable_name:
+                    metadata.mode |= 0o111
+                with source.open("rb") as content:
+                    package.addfile(metadata, content)
 
     return archive
 

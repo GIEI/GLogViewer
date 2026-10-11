@@ -84,3 +84,5 @@ All repository content and every source comment must be written in English. See 
 ## Status and license
 
 Status: `0.5.0-alpha.1`; the Windows 1 GiB benchmark and automated Windows/Linux/macOS CI gates pass. CI now builds and tests release archives for all three platforms; the tagged stable release flow and remaining release hardening still need validation before 1.0. The existing [LICENSE](LICENSE) governs the repository.
+
+See the [release process](docs/RELEASE_PROCESS.md) for the tag-based packaging workflow.

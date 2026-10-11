@@ -38,6 +38,7 @@ class ReleasePackageTests(unittest.TestCase):
                 )
                 with tarfile.open(archive, "r:gz") as package:
                     self.assertEqual(set(package.getnames()), required_files)
+                    self.assertNotEqual(package.getmember("logview").mode & 0o111, 0)
                     self.assertEqual(package.extractfile("logview").read(),
                                      b"unix executable fixture")
 
