@@ -79,6 +79,7 @@ typedef struct {
     int search_navigation_active;
     int search_navigation_progress;
     uint64_t physical_records;
+    uint64_t physical_checkpoint_count;
     TuiContextRow context_rows[TUI_CONTEXT_RADIUS * 2 + 1];
     size_t context_count;
     uint64_t context_anchor_line;
@@ -129,12 +130,25 @@ static int read_checkpoint(TuiState *state, uint64_t sequence,
 static int read_physical_checkpoint(TuiState *state, uint64_t line_number,
                                     TuiCheckpoint *checkpoint)
 {
-    uint64_t checkpoint_number = (line_number - 1) / TUI_CHECKPOINT_ROWS;
+    uint64_t low = 0;
+    uint64_t high = state->physical_checkpoint_count;
     uint64_t index_offset;
-    if (checkpoint_number > UINT64_MAX / sizeof(*checkpoint)) return 0;
-    index_offset = checkpoint_number * sizeof(*checkpoint);
-    if (fflush(state->physical_index_file) != 0 ||
-        !tui_seek(state->physical_index_file, index_offset) ||
+    TuiCheckpoint candidate;
+    if (line_number == 0 || high == 0 ||
+        fflush(state->physical_index_file) != 0) return 0;
+    while (low < high) {
+        uint64_t middle = low + (high - low) / 2;
+        if (middle > UINT64_MAX / sizeof(candidate)) return 0;
+        index_offset = middle * sizeof(candidate);
+        if (!tui_seek(state->physical_index_file, index_offset) ||
+            fread(&candidate, sizeof(candidate), 1,
+                  state->physical_index_file) != 1) return 0;
+        if (candidate.line_number <= line_number) low = middle + 1;
+        else high = middle;
+    }
+    if (low == 0) return 0;
+    index_offset = (low - 1) * sizeof(*checkpoint);
+    if (!tui_seek(state->physical_index_file, index_offset) ||
         fread(checkpoint, sizeof(*checkpoint), 1,
               state->physical_index_file) != 1) return 0;
     return 1;
@@ -145,11 +159,14 @@ static int add_physical_checkpoint(TuiState *state, uint64_t line_number,
 {
     TuiCheckpoint checkpoint;
     if (line_number == 0 || (line_number - 1) % TUI_CHECKPOINT_ROWS != 0) return 1;
-    checkpoint.sequence = line_number;
+    if (state->format == FORMAT_JSONL && state->reader->json_active) return 1;
+    checkpoint.sequence = state->total_rows;
     checkpoint.line_number = line_number;
     checkpoint.byte_offset = byte_offset;
-    return fwrite(&checkpoint, sizeof(checkpoint), 1,
-                  state->physical_index_file) == 1;
+    if (fwrite(&checkpoint, sizeof(checkpoint), 1,
+               state->physical_index_file) != 1) return 0;
+    state->physical_checkpoint_count++;
+    return 1;
 }
 
 static int index_physical_line(void *context, uint64_t line_number,
@@ -941,6 +958,7 @@ static void render(TuiState *state)
     } else if (state->help_visible) {
         fputs("\n  Up/Down: move one row     PgUp/PgDn: move one page\n"
               "  Home/End: oldest/newest  /: search  Enter/Shift+Enter: next/previous match\n"
+              "  J: jump to a source line (next visible result if filtered)\n"
               "  z: zoom the selected record and scroll through its full contents\n"
               "  e/E: next/previous error  w/W: next/previous warning\n"
               "  c: show/hide context around the selected record\n"
@@ -1000,7 +1018,7 @@ static void render(TuiState *state)
     printf("\033[%d;1H\033[2K%s%s", rows - 1,
            state->search_text[0] ? "Search: " : "Search: (none) | ",
            state->search_text[0] ? state->search_text :
-           "? help  / search  f filter  r regex  x export  q quit");
+           "? help  / search  J jump  f filter  r regex  x export  q quit");
     printf("\033[%d;1H\033[2K%s", rows, state->status);
     fflush(stdout);
     state->terminal_columns = columns;
@@ -1056,6 +1074,7 @@ static int reset_indexes(TuiState *state)
     state->total_rows = 0;
     state->cursor = 0;
     state->physical_records = 0;
+    state->physical_checkpoint_count = 0;
     state->context_count = 0;
     state->context_visible = 0;
     state->search_navigation_active = 0;
@@ -1081,6 +1100,146 @@ static int prompt_search(TuiState *state)
     state->status[0] = '\0';
     if (replacement != NULL) start_search_navigation(state, 1, 1);
     else if (state->total_rows != 0) state->cursor = oldest_sequence(state);
+    return 0;
+}
+
+static int parse_jump_line(const char *text, uint64_t *line_number)
+{
+    uint64_t value = 0;
+    const unsigned char *cursor = (const unsigned char *)text;
+    if (*cursor == '\0') return 0;
+    while (*cursor != '\0') {
+        unsigned int digit;
+        if (*cursor < '0' || *cursor > '9') return 0;
+        digit = (unsigned int)(*cursor - '0');
+        if (value > (UINT64_MAX - digit) / 10u) return 0;
+        value = value * 10u + digit;
+        cursor++;
+    }
+    if (value == 0) return 0;
+    *line_number = value;
+    return 1;
+}
+
+static int jump_to_line(TuiState *state)
+{
+    char text[TUI_QUERY_BYTES];
+    uint64_t target;
+    uint64_t sequence;
+    uint64_t last_sequence;
+    TuiCheckpoint checkpoint;
+
+    state->search_navigation_active = 0;
+    if (state->scanning) {
+        snprintf(state->status, sizeof(state->status),
+                 "Jump is available after the scan completes");
+        return 0;
+    }
+    if (!terminal_read_line(state->terminal, "Jump to source line: ",
+                            text, sizeof(text))) return 0;
+    if (!parse_jump_line(text, &target)) {
+        snprintf(state->status, sizeof(state->status),
+                 "Enter a positive source line number");
+        return 0;
+    }
+    if (target > state->physical_records) {
+        snprintf(state->status, sizeof(state->status),
+                 "Line %llu is beyond the end of the file (last line %llu)",
+                 (unsigned long long)target,
+                 (unsigned long long)state->physical_records);
+        return 0;
+    }
+    if (state->total_rows == 0) {
+        snprintf(state->status, sizeof(state->status),
+                 "No selected records to jump to");
+        return 0;
+    }
+
+    if (!read_physical_checkpoint(state, target, &checkpoint)) {
+        snprintf(state->status, sizeof(state->status),
+                 "Cannot read the source-line index");
+        return 0;
+    }
+    if (!reader_reposition(state->reader, checkpoint.byte_offset,
+                           checkpoint.line_number - 1)) {
+        snprintf(state->status, sizeof(state->status),
+                 "Cannot seek to the requested source line");
+        return 0;
+    }
+
+    sequence = checkpoint.sequence;
+    last_sequence = state->total_rows - 1;
+    for (;;) {
+        const unsigned char *line;
+        size_t length;
+        uint64_t number;
+        uint64_t offset;
+        ReaderResult result = state->format == FORMAT_JSONL ?
+            reader_next_json(state->reader, &line, &length, &number, &offset,
+                             NULL, NULL) :
+            reader_next(state->reader, &line, &length, &number, &offset);
+        if (result == READER_EOF) break;
+        if (result == READER_ERROR) {
+            snprintf(state->status, sizeof(state->status),
+                     "Error reading records at the requested line");
+            return 0;
+        }
+        if (result != READER_LINE) continue;
+        {
+            LogEntry entry;
+            int selected;
+            if (!parse_record(state->format, state->custom_pattern, state->scratch,
+                              line, length, number, offset, &entry)) continue;
+            selected = record_selected(&entry, line, length, *state->field_filter,
+                                       *state->raw_regex, *state->field_regex,
+                                       state->regex_field_name);
+            if (selected < 0) {
+                snprintf(state->status, sizeof(state->status),
+                         "Regex work limit exceeded at line %llu",
+                         (unsigned long long)number);
+                return 0;
+            }
+            if (!selected) continue;
+            if (number >= target) {
+                if (sequence >= state->total_rows) {
+                    snprintf(state->status, sizeof(state->status),
+                             "Input changed while jumping to the requested line");
+                    return 0;
+                }
+                cache_row(state, sequence, number, offset,
+                          classify_entry(&entry), line, length);
+                state->cursor = sequence;
+                state->context_visible = 0;
+                if (number == target) {
+                    snprintf(state->status, sizeof(state->status),
+                             "Jumped to source line %llu",
+                             (unsigned long long)number);
+                } else {
+                    snprintf(state->status, sizeof(state->status),
+                             "No selected record on line %llu; jumped to line %llu",
+                             (unsigned long long)target,
+                             (unsigned long long)number);
+                }
+                return 0;
+            }
+            sequence++;
+        }
+    }
+
+    if (ensure_sequence(state, last_sequence)) {
+        TuiRow *row = row_at(state, last_sequence);
+        if (row != NULL) {
+            state->cursor = last_sequence;
+            state->context_visible = 0;
+            snprintf(state->status, sizeof(state->status),
+                     "No selected record at or after line %llu; showing line %llu",
+                     (unsigned long long)target,
+                     (unsigned long long)row->line_number);
+            return 0;
+        }
+    }
+    snprintf(state->status, sizeof(state->status),
+             "Cannot locate a selected record for that line");
     return 0;
 }
 
@@ -1280,6 +1439,7 @@ static int handle_key(TuiState *state, TerminalKey key, Filter **filter,
     if (key.type == TERMINAL_KEY_CHARACTER) {
         if (key.character == 'q') return 1;
         if (key.character == '?') state->help_visible = 1;
+        else if (key.character == 'J') jump_to_line(state);
         else if (key.character == 'z') return zoom_selected_record(state);
         else if (key.character == 'C') {
             int changed = state->search_regex != NULL || *filter != NULL ||

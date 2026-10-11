@@ -151,11 +151,12 @@ The `--stats` output includes exact physical, parsed, rejected, and selected rec
 logview app.log --format jsonl --tui
 ```
 
-| Key | Proposed action |
+| Key | Action |
 | --- | --- |
 | Up/Down | Move one row. |
 | Page Up/Page Down | Move one screen. |
 | Home/End | Go to the first/last selected row in the scanned file. |
+| `J` | Enter a one-based source line number. If that line is filtered out, go to the next selected record; if none follows, go to the last selected record. |
 | `/` | Enter a regex search. Press Enter to jump to its first match. |
 | Enter / Shift+Enter | Go to the next/previous search match. |
 | Esc during search navigation | Cancel a long search. Progress appears in the status line. |

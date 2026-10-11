@@ -563,6 +563,72 @@ def main():
                 os.close(context_master)
                 os.close(context_slave)
 
+            jump_file = root / "tui-jump.jsonl"
+            jump_file.write_bytes(
+                b'{"level":"INFO","message":"line one"}\n'
+                b'{"level":"ERROR","message":"line two"}\n'
+                b'{"level":"WARN","message":"line three"}\n'
+                b'{"level":"ERROR","message":"line four"}\n'
+            )
+            jump_master, jump_slave = pty.openpty()
+            fcntl.ioctl(jump_slave, termios.TIOCSWINSZ,
+                        struct.pack("HHHH", 24, 100, 0, 0))
+            jump_process = subprocess.Popen(
+                [str(binary), str(jump_file), "--format", "jsonl",
+                 "--filter", "level=ERROR", "--tui"],
+                stdin=jump_slave,
+                stdout=jump_slave,
+                stderr=jump_slave,
+                close_fds=True,
+            )
+            jump_output = bytearray()
+            try:
+                def jump_read_until(needle, timeout, start=0):
+                    deadline = time.monotonic() + timeout
+                    while needle not in jump_output[start:] and \
+                            jump_process.poll() is None and time.monotonic() < deadline:
+                        ready, _, _ = select.select([jump_master], [], [], 0.1)
+                        if ready:
+                            try:
+                                jump_output.extend(os.read(jump_master, 65536))
+                            except OSError:
+                                break
+
+                jump_read_until(b"Scan complete", 3)
+                jump_start = len(jump_output)
+                os.write(jump_master, b"J3\n")
+                jump_read_until(b"No selected record on line 3; jumped to line 4",
+                                2, jump_start)
+                require(b"\033[7m       4 {\"level\":\"ERROR\"" in
+                        jump_output[jump_start:],
+                        "TUI jump should select the next visible record after a filtered source line")
+                jump_start = len(jump_output)
+                os.write(jump_master, b"J2\n")
+                jump_read_until(b"Jumped to source line 2", 2, jump_start)
+                require(b"\033[7m       2 {\"level\":\"ERROR\"" in
+                        jump_output[jump_start:],
+                        "TUI jump should select an exact source line")
+                jump_start = len(jump_output)
+                os.write(jump_master, b"Jabc\n")
+                jump_read_until(b"Enter a positive source line number", 2, jump_start)
+                jump_start = len(jump_output)
+                os.write(jump_master, b"J5\n")
+                jump_read_until(b"beyond the end of the file", 2, jump_start)
+                os.write(jump_master, b"q")
+                jump_process.wait(timeout=3)
+                require(jump_process.returncode == 0 and
+                        b"No selected record on line 3; jumped to line 4" in jump_output and
+                        b"Jumped to source line 2" in jump_output and
+                        b"Enter a positive source line number" in jump_output and
+                        b"beyond the end of the file" in jump_output,
+                        "TUI jump should report exact, filtered, invalid, and out-of-range requests")
+            finally:
+                if jump_process.poll() is None:
+                    jump_process.kill()
+                    jump_process.wait(timeout=5)
+                os.close(jump_master)
+                os.close(jump_slave)
+
             navigation_file = root / "tui-search-navigation.jsonl"
             navigation_file.write_bytes(b"".join(
                 ('{"message":"navigation record %05d"}\n' % number).encode("ascii")

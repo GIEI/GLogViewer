@@ -26,7 +26,7 @@ Common application fields worth preserving are timestamp, severity, message, ser
 | Field filters with AND/OR | Must | Reduce noise using structured data | Explicit precedence and missing-field rules. |
 | Internal regex on raw line or field | Must | Find text and highlight evidence | Supported subset; iterative NFA execution. |
 | CLI batch mode | Must | Use in scripts and incident runbooks | Stable exit codes and diagnostics. |
-| TUI browse/search/help | Must | Explore filtered records interactively | Bounded viewport cache, full-scan checkpoints, regex search, severity jumps, context view, and scrollable full-record zoom. |
+| TUI browse/search/help | Must | Explore filtered records interactively | Bounded viewport cache, full-scan checkpoints, regex search, source-line jumps, severity jumps, context view, and scrollable full-record zoom. |
 | Follow mode | Must | Watch a live application file | Append/truncate/rotation behavior documented. |
 | Text and CSV export | Must | Share a filtered evidence set | Streamed output with fixed CSV columns. |
 | Counts, timeline, frequent values | Must | Spot error spikes and dominant fields | Exact counters; bounded estimated heavy hitters. |
