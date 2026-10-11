@@ -1,6 +1,7 @@
 import subprocess
 import csv
 import io
+import json
 import os
 import signal
 import sys
@@ -105,6 +106,17 @@ def main():
         root = Path(temporary)
         sample_directory = Path(__file__).resolve().parents[1] / "SAMPLES"
         tested_samples = set()
+        crypto_sample = sample_directory / "crypto_historical_365days_1-level_10-MB_minified.json"
+        if crypto_sample.is_file():
+            crypto_date_range = run(
+                binary, str(crypto_sample), "--format", "jsonl", "--filter",
+                "date>=2024-12-10 and date<2024-12-16")
+            crypto_rows = [json.loads(line) for line in crypto_date_range.stdout.splitlines()]
+            require(crypto_date_range.returncode == 0 and
+                    [row["date"] for row in crypto_rows] == [
+                        "2024-12-10", "2024-12-11", "2024-12-12",
+                        "2024-12-13", "2024-12-14", "2024-12-15"],
+                    "the crypto sample should support a half-open timestamp range filter")
         check_reader_boundaries(binary, root)
 
         raw_file = root / "raw.log"
@@ -297,6 +309,41 @@ def main():
             b'{"severity":"ERROR","msg":"timeout"}\n',
             "filter precedence should evaluate AND before OR and support field regex",
         )
+        top_records = run(binary, str(json_file), "--format", "jsonl",
+                          "--filter", "level=ERROR", "--top", "2")
+        bottom_records = run(binary, str(json_file), "--format", "jsonl",
+                             "--filter", "level=ERROR", "--bottom", "2")
+        first_record = run(binary, str(json_file), "--format", "jsonl",
+                           "--record", "first")
+        last_record = run(binary, str(json_file), "--format", "jsonl",
+                          "--record", "last")
+        require(top_records.returncode == 0 and
+                top_records.stdout == (b'{"level":"ERROR","message":"connection timeout"}\n'
+                                       b'{"severity":"ERROR","msg":"timeout"}\n'),
+                "--top should emit the first N records matching active filters")
+        require(bottom_records.returncode == 0 and
+                bottom_records.stdout == (b'{"level":"ERROR","message":"other"}\n'
+                                          b'{"level":"ERROR","message":"nested","details":{"code":3}}\n'),
+                "--bottom should emit the last N matching records in source order: {!r} {!r} {!r}".format(
+                    bottom_records.returncode, bottom_records.stdout, bottom_records.stderr))
+        require(first_record.returncode == 0 and
+                first_record.stdout == b'{"level":"INFO","message":"timeout"}\n' and
+                last_record.returncode == 0 and
+                last_record.stdout == b'{"level":"ERROR","message":"bad surrogate \\uD800"}\n',
+                "--record first/last should print the complete matching source record")
+        date_file = root / "date-range.jsonl"
+        date_file.write_bytes(
+            b'{"timestamp":"2024-01-01T23:59:59Z","id":1}\n'
+            b'{"timestamp":"2024-01-02T00:00:00Z","id":2}\n'
+            b'{"timestamp":"2024-01-03T12:00:00Z","id":3}\n'
+            b'{"timestamp":"2024-01-04T00:00:00Z","id":4}\n'
+        )
+        date_range = run(binary, str(date_file), "--format", "jsonl", "--filter",
+                         "timestamp>=2024-01-02T00:00:00Z and timestamp<2024-01-04T00:00:00Z")
+        require(date_range.returncode == 0 and
+                date_range.stdout == (b'{"timestamp":"2024-01-02T00:00:00Z","id":2}\n'
+                                      b'{"timestamp":"2024-01-03T12:00:00Z","id":3}\n'),
+                "field comparison operators should support inclusive/exclusive string ranges")
         grouped = run(
             binary,
             str(json_file),
@@ -544,6 +591,54 @@ def main():
                     tui_process.wait(timeout=5)
                 os.close(master_fd)
                 os.close(slave_fd)
+
+            def check_limited_tui(option, expected_rows, label):
+                limited_master, limited_slave = pty.openpty()
+                fcntl.ioctl(limited_slave, termios.TIOCSWINSZ,
+                            struct.pack("HHHH", 24, 100, 0, 0))
+                limited_process = subprocess.Popen(
+                    [str(binary), str(tui_file), "--format", "jsonl", option, "2", "--tui"],
+                    stdin=limited_slave,
+                    stdout=limited_slave,
+                    stderr=limited_slave,
+                    close_fds=True,
+                )
+                captured = bytearray()
+                deadline = time.monotonic() + 5
+                try:
+                    while b"Scan complete" not in captured and limited_process.poll() is None and \
+                            time.monotonic() < deadline:
+                        ready, _, _ = select.select([limited_master], [], [], 0.1)
+                        if ready:
+                            try:
+                                captured.extend(os.read(limited_master, 65536))
+                            except OSError:
+                                break
+                    os.write(limited_master, b"q")
+                    limited_process.wait(timeout=5)
+                    while True:
+                        ready, _, _ = select.select([limited_master], [], [], 0.05)
+                        if not ready:
+                            break
+                        try:
+                            captured.extend(os.read(limited_master, 65536))
+                        except OSError:
+                            break
+                    require(limited_process.returncode == 0 and
+                            b"selected: 2" in captured and all(row in captured for row in expected_rows),
+                            "{} TUI should display the requested limited result window: {!r}".format(
+                                label, bytes(captured[-1500:])))
+                finally:
+                    if limited_process.poll() is None:
+                        limited_process.kill()
+                        limited_process.wait(timeout=5)
+                    os.close(limited_master)
+                    os.close(limited_slave)
+
+            check_limited_tui("--top", [b'"message":"startup"',
+                                         b'"message":"connection timeout"'], "top")
+            check_limited_tui("--bottom", [b'"message":"filler 598"',
+                                            b'"message":"filler 599"'], "bottom")
 
             context_master, context_slave = pty.openpty()
             fcntl.ioctl(context_slave, termios.TIOCSWINSZ,

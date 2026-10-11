@@ -9,6 +9,7 @@
 #include "regex.h"
 
 #include <errno.h>
+#include <limits.h>
 #include <stdio.h>
 #include <signal.h>
 #include <stdlib.h>
@@ -20,7 +21,7 @@
 #include <windows.h>
 #endif
 
-#define LOGVIEW_VERSION "1.0.0"
+#define LOGVIEW_VERSION "1.1.0"
 #define FIELD_NAME_CAPACITY 256
 
 typedef struct {
@@ -42,7 +43,15 @@ typedef struct {
     int from_start;
     int flush_partial;
     int tui_mode;
+    size_t result_limit;
+    int bottom_limit;
+    int record_mode;
 } Options;
+
+typedef struct {
+    uint64_t offset;
+    size_t length;
+} BottomRecord;
 
 volatile sig_atomic_t logview_stop_requested = 0;
 
@@ -59,6 +68,7 @@ static void print_usage(FILE *stream)
           "                [--regex pattern] [--regex-field field=pattern]\n"
           "                [--export text|csv --output path [--columns list] [--force]]\n"
           "                [--stats]\n"
+          "                [--top count | --bottom count] [--record first|last]\n"
           "                [--follow [--from-start] [--flush-partial]]\n"
           "                [--tui]\n"
           "                [--max-line-bytes count]\n"
@@ -68,7 +78,7 @@ static void print_usage(FILE *stream)
           "                           apache-common, apache-combined, nginx-combined,\n"
           "                           custom, or auto (default: raw).\n"
           "  --pattern PATTERN        Define a custom %{TOKEN} parsing pattern.\n"
-          "  --filter EXPRESSION      Combine field tests with =, !=, ~, and/or.\n"
+          "  --filter EXPRESSION      Combine field tests with =, !=, ~, <, <=, >, >=, and/or.\n"
           "  --regex pattern          Match a regular expression against each raw line.\n"
           "  --regex-field f=pattern  Match a regular expression against one field.\n"
           "  --export text|csv        Write selected records to an output file.\n"
@@ -76,6 +86,9 @@ static void print_usage(FILE *stream)
           "  --columns list           Set CSV columns (comma-separated field names).\n"
           "  --force                  Replace an existing export destination.\n"
           "  --stats                  Print exact record and level counts.\n"
+          "  --top count             Show the first count matching records.\n"
+          "  --bottom count          Show the last count matching records.\n"
+          "  --record first|last     Print the complete first or last matching record.\n"
           "  --follow                 Follow appended records until interrupted.\n"
           "  --from-start             Read existing records before following.\n"
           "  --flush-partial          Emit a final incomplete record on Ctrl-C.\n"
@@ -101,6 +114,17 @@ static int parse_unsigned_size(const char *text, size_t maximum, size_t *value)
     }
     *value = (size_t)parsed;
     return 1;
+}
+
+static int seek_file(FILE *file, uint64_t offset)
+{
+#ifdef _WIN32
+    if (offset > (uint64_t)INT64_MAX) return 0;
+    return _fseeki64(file, (__int64)offset, SEEK_SET) == 0;
+#else
+    if (offset > (uint64_t)LONG_MAX) return 0;
+    return fseek(file, (long)offset, SEEK_SET) == 0;
+#endif
 }
 
 static int parse_options(int argc, char **argv, Options *options)
@@ -185,6 +209,20 @@ static int parse_options(int argc, char **argv, Options *options)
             options->stats_mode = 1;
             continue;
         }
+        if (strcmp(argument, "--top") == 0 || strcmp(argument, "--bottom") == 0) {
+            int bottom = strcmp(argument, "--bottom") == 0;
+            if (++index >= argc || options->result_limit != 0 ||
+                !parse_unsigned_size(argv[index], 1000000u, &options->result_limit)) return -1;
+            options->bottom_limit = bottom;
+            continue;
+        }
+        if (strcmp(argument, "--record") == 0) {
+            if (++index >= argc || options->record_mode != 0) return -1;
+            if (strcmp(argv[index], "first") == 0) options->record_mode = 1;
+            else if (strcmp(argv[index], "last") == 0) options->record_mode = 2;
+            else return -1;
+            continue;
+        }
         if (strcmp(argument, "--follow") == 0) {
             if (options->follow_mode) return -1;
             options->follow_mode = 1;
@@ -230,11 +268,15 @@ static int parse_options(int argc, char **argv, Options *options)
          (!options->export_set || options->export_format != OUTPUT_CSV)) ||
         (options->force_output && !options->export_set)) return -1;
     if (options->stats_mode && (options->export_set || options->output_path != NULL ||
-        options->column_list != NULL || options->force_output)) return -1;
+        options->column_list != NULL || options->force_output || options->result_limit != 0 ||
+        options->record_mode != 0)) return -1;
     if ((options->from_start || options->flush_partial) && !options->follow_mode) return -1;
-    if (options->follow_mode && (options->stats_mode || options->export_set)) return -1;
+    if (options->follow_mode && (options->stats_mode || options->export_set ||
+        options->result_limit != 0 || options->record_mode != 0)) return -1;
     if (options->tui_mode && (options->stats_mode || options->export_set ||
-                              options->flush_partial)) return -1;
+                              options->flush_partial || options->record_mode != 0)) return -1;
+    if (options->record_mode != 0 && options->result_limit != 0) return -1;
+    if (options->record_mode != 0 && options->export_set) return -1;
     return 0;
 }
 
@@ -452,6 +494,13 @@ int main(int argc, char **argv)
     uint64_t follow_line_base = 0;
     int result_code = 2;
     int flush_on_stop = 0;
+    FILE *bottom_spool = NULL;
+    BottomRecord *bottom_records = NULL;
+    size_t bottom_count = 0;
+    size_t bottom_next = 0;
+    uint64_t bottom_spool_offset = 0;
+    unsigned char *last_record = NULL;
+    size_t last_record_length = 0;
     const unsigned char *line;
     size_t line_length;
     uint64_t line_number;
@@ -539,6 +588,15 @@ int main(int argc, char **argv)
         goto cleanup;
     }
     output_ready = 1;
+    if (options.result_limit != 0 && options.bottom_limit && !options.tui_mode) {
+        bottom_spool = tmpfile();
+        bottom_records = (BottomRecord *)calloc(options.result_limit,
+                                                sizeof(*bottom_records));
+        if (bottom_spool == NULL || bottom_records == NULL) {
+            fputs("logview: cannot allocate temporary storage for --bottom.\n", stderr);
+            goto cleanup;
+        }
+    }
     if (options.format == FORMAT_JSONL) {
         if (!json_scratch_init(&scratch, options.max_line_bytes)) {
             fputs("logview: cannot allocate JSON parsing memory.\n", stderr);
@@ -566,6 +624,7 @@ int main(int argc, char **argv)
                               options.custom_pattern, &scratch,
                               &field_filter, &raw_regex, &field_regex,
                               regex_field_name, options.follow_mode,
+                              options.result_limit, options.bottom_limit,
                               options.input_path,
                               options.input_path);
         goto cleanup;
@@ -782,7 +841,38 @@ int main(int argc, char **argv)
                 result_code = 2;
                 goto cleanup;
             }
-            if (!options.stats_mode && !output_write(&output, &entry)) {
+            if (options.record_mode == 1) {
+                if (!output_write(&output, &entry)) {
+                    print_io_error("cannot write", "standard output");
+                    result_code = 2;
+                    goto cleanup;
+                }
+            } else if (options.record_mode == 2) {
+                unsigned char *copy = (unsigned char *)malloc(line_length == 0 ? 1 : line_length);
+                if (copy == NULL) {
+                    fputs("logview: cannot allocate memory for the last record.\n", stderr);
+                    result_code = 2;
+                    goto cleanup;
+                }
+                if (line_length != 0) memcpy(copy, line, line_length);
+                free(last_record);
+                last_record = copy;
+                last_record_length = line_length;
+            } else if (options.result_limit != 0 && options.bottom_limit && !options.tui_mode) {
+                BottomRecord *slot = &bottom_records[bottom_next];
+                slot->offset = bottom_spool_offset;
+                slot->length = line_length;
+                if ((line_length != 0 && fwrite(line, 1, line_length, bottom_spool) != line_length) ||
+                    fputc('\n', bottom_spool) == EOF ||
+                    UINT64_MAX - bottom_spool_offset < (uint64_t)line_length + 1u) {
+                    fputs("logview: cannot write temporary --bottom storage.\n", stderr);
+                    result_code = 2;
+                    goto cleanup;
+                }
+                bottom_spool_offset += (uint64_t)line_length + 1u;
+                bottom_next = (bottom_next + 1) % options.result_limit;
+                if (bottom_count < options.result_limit) bottom_count++;
+            } else if (!options.stats_mode && !output_write(&output, &entry)) {
                 print_io_error("cannot write", options.output_path != NULL ? options.output_path : "standard output");
                 result_code = 2;
                 goto cleanup;
@@ -793,11 +883,57 @@ int main(int argc, char **argv)
                 goto cleanup;
             }
             matched_count++;
+            if ((options.record_mode == 1 && matched_count != 0) ||
+                (options.result_limit != 0 && !options.bottom_limit &&
+                 !options.tui_mode && matched_count >= options.result_limit)) break;
         }
         if (options.follow_mode) follow_line_base = line_number;
         if (flush_on_stop && !reader.line_terminated) break;
     }
 
+    if (options.record_mode == 2 && matched_count != 0) {
+        LogEntry entry;
+        entry.raw.data = last_record;
+        entry.raw.length = last_record_length;
+        entry.line_number = line_number;
+        entry.byte_offset = byte_offset;
+        entry.field_count = 0;
+        entry.parse_ok = 0;
+        if (!output_write(&output, &entry)) {
+            print_io_error("cannot write", "standard output");
+            result_code = 2;
+            goto cleanup;
+        }
+    }
+    if (options.result_limit != 0 && options.bottom_limit && !options.tui_mode && matched_count != 0) {
+        size_t index;
+        size_t first = bottom_count == options.result_limit ? bottom_next : 0;
+        for (index = 0; index < bottom_count; index++) {
+            BottomRecord *record = &bottom_records[(first + index) % options.result_limit];
+            unsigned char *copy = (unsigned char *)malloc(record->length == 0 ? 1 : record->length);
+            LogEntry entry;
+            if (copy == NULL || !seek_file(bottom_spool, record->offset) ||
+                (record->length != 0 && fread(copy, 1, record->length, bottom_spool) != record->length)) {
+                free(copy);
+                fputs("logview: cannot read temporary --bottom storage.\n", stderr);
+                result_code = 2;
+                goto cleanup;
+            }
+            entry.raw.data = copy;
+            entry.raw.length = record->length;
+            entry.line_number = 0;
+            entry.byte_offset = 0;
+            entry.field_count = 0;
+            entry.parse_ok = 0;
+            if (!output_write(&output, &entry)) {
+                free(copy);
+                print_io_error("cannot write", "standard output");
+                result_code = 2;
+                goto cleanup;
+            }
+            free(copy);
+        }
+    }
     if (output_ready && !output_finish(&output)) {
         print_io_error("cannot write", options.output_path != NULL ? options.output_path : "standard output");
         output_ready = 0;
@@ -838,6 +974,9 @@ cleanup:
         print_io_error("cannot close", options.input_path);
         result_code = 2;
     }
+    if (bottom_spool != NULL) fclose(bottom_spool);
+    free(bottom_records);
+    free(last_record);
     regex_free(raw_regex);
     regex_free(field_regex);
     filter_free(field_filter);

@@ -70,6 +70,11 @@ typedef struct {
     Regex **field_regex;
     const char *regex_field_name;
     TuiRow rows[TUI_CACHE_ROWS];
+    TuiCheckpoint *limited_rows;
+    size_t result_limit;
+    size_t limited_count;
+    size_t limited_next;
+    int bottom_limit;
     uint64_t total_rows;
     uint64_t cursor;
     uint64_t search_navigation_sequence;
@@ -291,6 +296,17 @@ static int add_row(TuiState *state, uint64_t line_number, uint64_t byte_offset,
                    size_t length)
 {
     uint64_t sequence = state->total_rows;
+    if (state->result_limit != 0 && state->bottom_limit) {
+        TuiCheckpoint *slot = &state->limited_rows[state->limited_next];
+        slot->sequence = sequence;
+        slot->line_number = line_number;
+        slot->byte_offset = byte_offset;
+        state->limited_next = (state->limited_next + 1) % state->result_limit;
+        if (state->limited_count < state->result_limit) state->limited_count++;
+        state->total_rows++;
+        return 1;
+    }
+    if (state->result_limit != 0 && sequence >= state->result_limit) return 1;
     if (sequence % TUI_CHECKPOINT_ROWS == 0) {
         TuiCheckpoint checkpoint;
         checkpoint.sequence = sequence;
@@ -305,6 +321,29 @@ static int add_row(TuiState *state, uint64_t line_number, uint64_t byte_offset,
     } else if (state->cursor < oldest_sequence(state)) {
         state->cursor = oldest_sequence(state);
     }
+    return 1;
+}
+
+static int finalize_bottom_rows(TuiState *state)
+{
+    FILE *replacement;
+    size_t index;
+    size_t first;
+    if (state->result_limit == 0 || !state->bottom_limit) return 1;
+    replacement = tmpfile();
+    if (replacement == NULL) return 0;
+    fclose(state->index_file);
+    state->index_file = replacement;
+    first = state->limited_count == state->result_limit ? state->limited_next : 0;
+    memset(state->rows, 0, sizeof(state->rows));
+    for (index = 0; index < state->limited_count; index++) {
+        TuiCheckpoint checkpoint = state->limited_rows[(first + index) % state->result_limit];
+        checkpoint.sequence = index;
+        if (index % TUI_CHECKPOINT_ROWS == 0 &&
+            fwrite(&checkpoint, sizeof(checkpoint), 1, state->index_file) != 1) return 0;
+    }
+    state->total_rows = state->limited_count;
+    state->cursor = 0;
     return 1;
 }
 
@@ -1072,6 +1111,8 @@ static int reset_indexes(TuiState *state)
     state->index_file = new_index;
     state->physical_index_file = new_physical_index;
     state->total_rows = 0;
+    state->limited_count = 0;
+    state->limited_next = 0;
     state->cursor = 0;
     state->physical_records = 0;
     state->physical_checkpoint_count = 0;
@@ -1130,6 +1171,11 @@ static int jump_to_line(TuiState *state)
     TuiCheckpoint checkpoint;
 
     state->search_navigation_active = 0;
+    if (state->result_limit != 0) {
+        snprintf(state->status, sizeof(state->status),
+                 "Source-line jump is unavailable with a limited result view");
+        return 0;
+    }
     if (state->scanning) {
         snprintf(state->status, sizeof(state->status),
                  "Jump is available after the scan completes");
@@ -1321,6 +1367,11 @@ static int export_view(TuiState *state)
     uint64_t saved_line_number = state->reader->next_line_number;
     uint64_t exported = 0;
     int success = 1;
+    if (state->result_limit != 0) {
+        snprintf(state->status, sizeof(state->status),
+                 "Export is unavailable with a limited result view");
+        return 0;
+    }
     if (state->scanning) {
         snprintf(state->status, sizeof(state->status), "Export is available after the scan completes");
         return 0;
@@ -1579,6 +1630,7 @@ int tui_run(FILE **input_file, LineReader *reader, InputFormat format,
             const char *custom_pattern, JsonScratch *scratch,
             Filter **field_filter, Regex **raw_regex, Regex **field_regex,
             const char *regex_field_name, int follow_enabled,
+            size_t result_limit, int bottom_limit,
             const char *input_path,
             const char *follow_path)
 {
@@ -1588,10 +1640,24 @@ int tui_run(FILE **input_file, LineReader *reader, InputFormat format,
     memset(&state, 0, sizeof(state));
     state.index_file = tmpfile();
     state.physical_index_file = tmpfile();
+    state.result_limit = result_limit;
+    state.bottom_limit = bottom_limit;
+    if (result_limit != 0) {
+        state.limited_rows = (TuiCheckpoint *)calloc(result_limit,
+                                                     sizeof(*state.limited_rows));
+    }
     if (state.index_file == NULL || state.physical_index_file == NULL) {
         fputs("logview: cannot create a temporary TUI navigation index.\n", stderr);
         if (state.index_file != NULL) fclose(state.index_file);
         if (state.physical_index_file != NULL) fclose(state.physical_index_file);
+        free(state.limited_rows);
+        return 2;
+    }
+    if (result_limit != 0 && state.limited_rows == NULL) {
+        fputs("logview: cannot allocate the limited TUI result index.\n", stderr);
+        fclose(state.index_file);
+        fclose(state.physical_index_file);
+        free(state.limited_rows);
         return 2;
     }
     state.input = *input_file;
@@ -1610,12 +1676,14 @@ int tui_run(FILE **input_file, LineReader *reader, InputFormat format,
         fputs("logview: --tui requires an interactive input and output terminal.\n", stderr);
         fclose(state.index_file);
         fclose(state.physical_index_file);
+        free(state.limited_rows);
         return 2;
     }
     if (!reader_reposition(reader, 0, 0)) {
         terminal_leave(state.terminal);
         fclose(state.index_file);
         fclose(state.physical_index_file);
+        free(state.limited_rows);
         return 2;
     }
     state.scanning = 1;
@@ -1649,6 +1717,13 @@ int tui_run(FILE **input_file, LineReader *reader, InputFormat format,
             break;
         }
         if (result == READER_EOF) {
+            if (!finalize_bottom_rows(&state)) {
+                result_code = 2;
+                snprintf(state.status, sizeof(state.status), "Cannot finalize the last records index");
+                state.scanning = 0;
+                render(&state);
+                break;
+            }
             if (state.follow_enabled) {
                 state.scanning = 0;
                 state.follow_observed_end = reader->next_offset;
@@ -1704,6 +1779,7 @@ int tui_run(FILE **input_file, LineReader *reader, InputFormat format,
             regex_free(state.search_regex);
             fclose(state.index_file);
             fclose(state.physical_index_file);
+            free(state.limited_rows);
             *input_file = state.input;
             return 2;
         }
@@ -1724,6 +1800,7 @@ int tui_run(FILE **input_file, LineReader *reader, InputFormat format,
                     regex_free(state.search_regex);
                     fclose(state.index_file);
                     fclose(state.physical_index_file);
+                    free(state.limited_rows);
                     *input_file = state.input;
                     return 2;
                 }
@@ -1736,6 +1813,7 @@ int tui_run(FILE **input_file, LineReader *reader, InputFormat format,
                     regex_free(state.search_regex);
                     fclose(state.index_file);
                     fclose(state.physical_index_file);
+                    free(state.limited_rows);
                     *input_file = state.input;
                     return 2;
                 }
@@ -1763,6 +1841,7 @@ int tui_run(FILE **input_file, LineReader *reader, InputFormat format,
     regex_free(state.search_regex);
     fclose(state.index_file);
     fclose(state.physical_index_file);
+    free(state.limited_rows);
     *input_file = state.input;
     return result_code;
 }

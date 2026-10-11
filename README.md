@@ -1,12 +1,13 @@
 # GLogViewer
 
-GLogViewer is a cross-platform, dependency-free C99 tool for exploring large structured log files from a command line or terminal interface. The executable is `logview`. The batch CLI supports raw and JSON Lines input, syslog RFC 3164/5424, Apache/Nginx access logs, custom patterns, format detection, compound filters, regex, text/CSV export, exact record/level counts, a timestamp timeline, estimated frequent field values, and follow mode with truncation and rotation detection. The TUI supports a bounded viewport, checkpoint-backed navigation and regex search across the full scan, source-line jumps, error/warning jumps, physical context lines, full-record zoom, filter edits, export of filtered/search-matched records, and live follow. The current stable release is [1.0.0](https://github.com/GIEI/GLogViewer/releases/tag/v1.0.0); see the [release notes](CHANGELOG.md), [user manual](docs/USER_MANUAL.md), and [known limits](docs/TECHNICAL_SPECIFICATION.md).
+GLogViewer is a cross-platform, dependency-free C99 tool for exploring large structured log files from a command line or terminal interface. The executable is `logview`. The batch CLI supports raw and JSON Lines input, syslog RFC 3164/5424, Apache/Nginx access logs, custom patterns, format detection, compound and range filters, regex, record sampling, text/CSV export, exact record/level counts, timestamp timelines, estimated frequent field values, and follow mode with truncation and rotation detection. The TUI supports bounded result windows, viewport navigation, regex search, source-line jumps, error/warning jumps, physical context lines, full-record zoom, filter edits, export, and live follow. The latest stable release is [1.1.0](https://github.com/GIEI/GLogViewer/releases/tag/v1.1.0); see the [release notes](CHANGELOG.md), [user manual](docs/USER_MANUAL.md), and [known limits](docs/TECHNICAL_SPECIFICATION.md).
 
-## Version 1.0 features
+## Features
 
 - Stream files larger than 1 GB with bounded application memory.
 - Parse RFC 3164-like and RFC 5424 syslog, Apache/Nginx access logs, JSON Lines plus pretty-printed JSON object arrays with nested fields, and custom placeholder patterns.
-- Combine field predicates and an internal regular expression engine.
+- Combine equality, regex, and lexical range predicates with an internal regular expression engine.
+- Inspect a full first or last matching record; limit batch or TUI results with `--top N` and `--bottom N`.
 - Browse and search in a terminal UI, follow appended records, export text or CSV, and calculate summary statistics.
 - Build on Windows, macOS, and Linux using C99 plus minimal platform console and file APIs.
 
@@ -39,7 +40,7 @@ build\logview.exe SAMPLES\enwik8 --regex "Wikipedia"
 build\logview.exe app.jsonl --format jsonl --filter "level=ERROR" --regex-field "message=timeout"
 ```
 
-Available formats are `raw` (the default), `jsonl`, `syslog3164`, `syslog5424`, `apache-common`, `apache-combined`, `nginx-combined`, `custom`, and `auto`. Filters support `=`, `!=`, `~`, `and`, `or`, and parentheses. Use `--help` for the exact options.
+Available formats are `raw` (the default), `jsonl`, `syslog3164`, `syslog5424`, `apache-common`, `apache-combined`, `nginx-combined`, `custom`, and `auto`. Filters support `=`, `!=`, `~`, `<`, `<=`, `>`, `>=`, `and`, `or`, and parentheses. Range comparisons are lexical; fixed-format dates with matching timezone conventions sort chronologically.
 
 For formatted JSON datasets, `jsonl` also accepts a top-level array of multiline objects and exposes nested primitive fields through dotted paths. A leaf field name such as `phone` can be used as a short alias when unambiguous in the record:
 
@@ -55,12 +56,15 @@ build\logview.exe SAMPLES\employees_5-level_1-GB_formatted.json --format jsonl -
 
 ## More examples
 
-Text/CSV export, statistics, and follow are available. The TUI uses a bounded row cache and a temporary on-disk checkpoint index for navigation across the full scan. Timestamp timeline output uses a second streaming pass; frequent field/value counts are bounded estimates.
+Text/CSV export, statistics, and follow are available. The TUI uses a bounded row cache and a temporary on-disk checkpoint index for navigation across the full scan. `--top N` and `--bottom N` limit batch or TUI results, while `--record first|last` prints a complete matching record for inspection. Field filters support lexical range operators for sortable values such as fixed-format timestamps. Timestamp timeline output uses a second streaming pass; frequent field/value counts are bounded estimates.
 
 ```text
 logview app.log --format custom --pattern "%{TIMESTAMP:ts} %{LEVEL:lvl} %{MESSAGE:msg}" --filter "level=ERROR" --regex "timeout"
 logview access.log --format apache-combined --filter "status=500 or status=502" --export csv --output errors.csv
 logview app.jsonl --format jsonl --stats
+logview app.jsonl --format jsonl --filter "timestamp>=2026-10-01T00:00:00Z and timestamp<2026-11-01T00:00:00Z" --top 10
+logview app.jsonl --format jsonl --record first
+logview app.jsonl --format jsonl --bottom 10 --tui
 logview --follow app.log --format jsonl --filter "level=ERROR"
 logview --stats app.log --format jsonl
 logview --tui app.log
@@ -83,6 +87,6 @@ All repository content and every source comment must be written in English. See 
 
 ## Status and license
 
-Status: `1.0.0`; Windows, Linux, and macOS release builds, tests, and package checks pass. Release archives include SHA-256 checksums and GitHub artifact attestations. The existing [LICENSE](LICENSE) governs the repository.
+Status: `1.1.0`; Windows, Linux, and macOS release builds, tests, and package checks must pass before the tag workflow publishes archives with SHA-256 checksums and GitHub artifact attestations. The existing [LICENSE](LICENSE) governs the repository.
 
 See the [release process](docs/RELEASE_PROCESS.md) for the tag-based packaging workflow.

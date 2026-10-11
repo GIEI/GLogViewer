@@ -10,7 +10,8 @@
 #define FILTER_VALUE_CAPACITY 1024
 
 typedef enum { NODE_PREDICATE, NODE_AND, NODE_OR } NodeKind;
-typedef enum { OP_EQUAL, OP_NOT_EQUAL, OP_REGEX } PredicateOp;
+typedef enum { OP_EQUAL, OP_NOT_EQUAL, OP_REGEX, OP_LESS, OP_LESS_EQUAL,
+               OP_GREATER, OP_GREATER_EQUAL } PredicateOp;
 
 typedef struct {
     NodeKind kind;
@@ -144,7 +145,19 @@ static int parse_predicate(FilterParser *parser)
     memcpy(node->field, parser->text + start, length);
     node->field[length] = '\0';
     skip_space(parser);
-    if (parser->text[parser->position] == '=' && parser->text[parser->position + 1] != '=') {
+    if (parser->text[parser->position] == '>' && parser->text[parser->position + 1] == '=') {
+        node->op = OP_GREATER_EQUAL;
+        parser->position += 2;
+    } else if (parser->text[parser->position] == '<' && parser->text[parser->position + 1] == '=') {
+        node->op = OP_LESS_EQUAL;
+        parser->position += 2;
+    } else if (parser->text[parser->position] == '>') {
+        node->op = OP_GREATER;
+        parser->position++;
+    } else if (parser->text[parser->position] == '<') {
+        node->op = OP_LESS;
+        parser->position++;
+    } else if (parser->text[parser->position] == '=' && parser->text[parser->position + 1] != '=') {
         node->op = OP_EQUAL;
         parser->position++;
     } else if (parser->text[parser->position] == '!' && parser->text[parser->position + 1] == '=') {
@@ -154,7 +167,7 @@ static int parse_predicate(FilterParser *parser)
         node->op = OP_REGEX;
         parser->position++;
     } else {
-        snprintf(parser->error, parser->error_capacity, "expected '=', '!=', or '~' after field");
+        snprintf(parser->error, parser->error_capacity, "expected '=', '!=', '~', '<', '<=', '>', or '>=' after field");
         return -1;
     }
     if (!parse_value(parser, node->value, sizeof(node->value))) return -1;
@@ -255,6 +268,16 @@ static int span_equals(const ByteSpan span, const char *text)
     return span.length == length && memcmp(span.data, text, length) == 0;
 }
 
+static int span_compare_text(ByteSpan span, const char *text)
+{
+    size_t text_length = strlen(text);
+    size_t common = span.length < text_length ? span.length : text_length;
+    int result = common == 0 ? 0 : memcmp(span.data, text, common);
+    if (result != 0) return result < 0 ? -1 : 1;
+    if (span.length == text_length) return 0;
+    return span.length < text_length ? -1 : 1;
+}
+
 static int evaluate(const Filter *filter, int index, const LogEntry *entry,
                     RegexResult *regex_result)
 {
@@ -271,6 +294,10 @@ static int evaluate(const Filter *filter, int index, const LogEntry *entry,
     if (!found) return 0;
     if (node->op == OP_EQUAL) return span_equals(value, node->value);
     if (node->op == OP_NOT_EQUAL) return !span_equals(value, node->value);
+    if (node->op == OP_LESS) return span_compare_text(value, node->value) < 0;
+    if (node->op == OP_LESS_EQUAL) return span_compare_text(value, node->value) <= 0;
+    if (node->op == OP_GREATER) return span_compare_text(value, node->value) > 0;
+    if (node->op == OP_GREATER_EQUAL) return span_compare_text(value, node->value) >= 0;
     *regex_result = regex_search(node->regex, value.data, value.length);
     return *regex_result == REGEX_MATCH;
 }

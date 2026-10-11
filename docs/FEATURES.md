@@ -1,6 +1,6 @@
 # Feature Catalogue and Product Positioning
 
-**Status:** this catalogue describes the stable 1.0 release. The 0.1 MVP, core 0.2 formats/filters, 0.3 export/statistics, 0.4 follow, and 0.5 interactive exploration milestones are implemented. Windows, Linux, and macOS CI, Linux sanitizer checks, and release packaging pass. Exact behavior and known limits are specified in [Technical Specification](TECHNICAL_SPECIFICATION.md).
+**Status:** this catalogue describes the 1.1 release. It builds on the stable 1.0 release with lexical range filters, record sampling, and bounded result windows. Windows, Linux, and macOS CI, Linux sanitizer checks, and release packaging gate publication. Exact behavior and known limits are specified in [Technical Specification](TECHNICAL_SPECIFICATION.md).
 
 ## 1. Users and jobs
 
@@ -24,6 +24,7 @@ Common application fields worth preserving are timestamp, severity, message, ser
 | Custom placeholder pattern | Must | Work with application-specific text logs | Deterministic delimiter-based extraction. |
 | JSON Lines and formatted JSON object arrays | Must | Analyze structured application logs and exported datasets | Bounded nested objects/arrays, dotted field paths, and leaf aliases. |
 | Field filters with AND/OR | Must | Reduce noise using structured data | Explicit precedence and missing-field rules. |
+| Range filters and record sampling | Should | Inspect record structure and select ordered value windows | Bytewise field comparisons (`<`, `<=`, `>`, `>=`), `--record first|last`, and `--top/--bottom N`. |
 | Internal regex on raw line or field | Must | Find text and highlight evidence | Supported subset; iterative NFA execution. |
 | CLI batch mode | Must | Use in scripts and incident runbooks | Stable exit codes and diagnostics. |
 | TUI browse/search/help | Must | Explore filtered records interactively | Bounded viewport cache, full-scan checkpoints, regex search, source-line jumps, severity jumps, context view, and scrollable full-record zoom. |

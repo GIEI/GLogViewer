@@ -1,5 +1,22 @@
 # GLogViewer Changelog
 
+## 1.1.0
+
+Adds date and value range filtering, bounded result windows, and full-record inspection from the command line.
+
+### Included
+
+- Add lexical field comparisons with `<`, `<=`, `>`, and `>=`, suitable for fixed-format date and timestamp values.
+- Add `--top N` and `--bottom N` in batch mode and the TUI to inspect a finite result window.
+- Add `--record first|last` to print the complete first or last matching record, including multiline JSON records.
+- Disable source-line jump and TUI export when using a limited result window, keeping those actions consistent with the visible subset.
+- Expand CLI, sample-based date-range, and POSIX TUI test coverage; document the new commands and limitations.
+
+### Validation
+
+- Windows build and complete CLI suite pass, including the six-record date interval from the crypto sample in `SAMPLES`.
+- POSIX TUI tests cover top and bottom result windows in a pseudo-terminal; the release workflow gates publication on Linux/macOS suites and Linux sanitizers.
+
 ## 1.0.0
 
 First stable release.
