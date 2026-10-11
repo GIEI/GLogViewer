@@ -41,7 +41,7 @@ python tests\benchmark_release.py build\logview.exe `
 
 ### Windows 1.0 reference result
 
-The clean `186cf1a` 1.0.0 Windows build was measured with optimized MSVC. It scanned a generated 1 GiB raw-text fixture on the NVMe reference volume with stdout redirected to the null device, using one warmup followed by five measured scans. The median was **0.765 seconds** (range 0.755–0.772 seconds), or **1.31 GiB/s**. Peak RSS was **4.15 MiB**, below the 64 MiB target. The fixture contains 21,053,761 complete 50-byte records and a 13-byte unterminated final record. This is a single-machine observation, not a cross-platform guarantee. The [redacted benchmark report](benchmarks/windows-reference-2026-10-11.json) contains the run data without workstation identifiers or drive paths. Its RSS value conservatively includes executable, runtime, and stack memory; it is not a direct heap measurement.
+The clean `186cf1a` 1.0.0 Windows build was measured with optimized MSVC. It scanned a generated 1 GiB raw-text fixture on the NVMe reference volume with stdout redirected to the null device, using one warmup followed by five measured scans. The median was **0.765 seconds** (range 0.755–0.772 seconds), or **1.31 GiB/s**. Peak RSS was **4.14 MiB**, below the 64 MiB target. The fixture contains 21,053,761 complete records of 50 bytes plus LF (51 bytes each) and a 13-byte unterminated final record. This is a single-machine observation, not a cross-platform guarantee. The [redacted benchmark report](benchmarks/windows-reference-2026-10-11.json) contains the run data without workstation identifiers or drive paths. Its RSS value conservatively includes executable, runtime, and stack memory; it is not a direct heap measurement.
 
 ## Windows CLI validation
 
