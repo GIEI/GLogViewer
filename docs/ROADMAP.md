@@ -1,6 +1,6 @@
 # Roadmap to Version 1.0
 
-**Status:** release plan, 2026-10-11. The 0.1–0.5 milestones are implemented. The CLI suite is reported passing on Windows, Linux, and macOS; the expanded Linux PTY suite has passed. The GitHub Actions matrix passes on Windows, Linux, and macOS, and the Linux sanitizer job passes. The formal 1 GiB release benchmark and broader release hardening remain. See [validation notes](VALIDATION.md). This roadmap stages the [1.0 technical contract](TECHNICAL_SPECIFICATION.md).
+**Status:** release plan, 2026-10-11. The 0.1–0.5 milestones are implemented. The CLI suite is reported passing on Windows, Linux, and macOS; the expanded Linux PTY suite has passed. The GitHub Actions matrix passes on Windows, Linux, and macOS, and the Linux sanitizer job passes. The formal 1 GiB warm-cache benchmark passed on the Windows reference machine; broader release hardening remains. See [validation notes](VALIDATION.md). This roadmap stages the [1.0 technical contract](TECHNICAL_SPECIFICATION.md).
 
 ## Product decision
 
@@ -78,7 +78,7 @@ The `--tui` implementation provides a 256-row memory cache, temporary checkpoint
 
 ## 0.9: release candidate and 1.0 decision
 
-Freeze the 1.0 CLI and file-format behavior. Run the full test suite and sanitizer or equivalent checks available per platform; the suite now covers high-cardinality statistics, malformed input, long paths on POSIX, invalid UTF-8 CSV output, and output failures. Add sanitizer or equivalent runs and broader Unicode checks. Publish a benchmark report using the protocol in the technical specification: generated 1 GiB fixture, five warm-cache runs, median elapsed time, peak heap/RSS, compiler settings, CPU, storage, and output destination. Freeze the reference machine before running the acceptance benchmark.
+Freeze the 1.0 CLI and file-format behavior. Run the full test suite and sanitizer or equivalent checks available per platform; the suite now covers high-cardinality statistics, malformed input, long paths on POSIX, invalid UTF-8 CSV output, and output failures. The Linux sanitizer job passes. Add broader Unicode checks. The Windows 1 GiB reference benchmark is recorded in [validation notes](VALIDATION.md); repeat it when the reference hardware or release build changes.
 
 The 1.0 release requires:
 

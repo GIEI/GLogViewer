@@ -1,6 +1,6 @@
 # Software Architecture
 
-**Status:** 1.0 target architecture. Milestones 0.1–0.5 are implemented; Windows and Linux test suites have passed, and the user reports the macOS suite passing. Formal release benchmarking and broader release hardening remain. The behavioral contract is in [Technical Specification](TECHNICAL_SPECIFICATION.md), and delivery stages are in the [roadmap](ROADMAP.md).
+**Status:** 1.0 target architecture. Milestones 0.1–0.5 are implemented; Windows and Linux test suites have passed, and the user reports the macOS suite passing. The Windows 1 GiB benchmark passes; broader release hardening remains. The behavioral contract is in [Technical Specification](TECHNICAL_SPECIFICATION.md), and delivery stages are in the [roadmap](ROADMAP.md).
 
 ## 1. Architectural goals
 
@@ -135,7 +135,7 @@ The core sees `platform_file_open`, `platform_file_seek64`, `platform_file_ident
 
 | Release | Architectural slice | Gate |
 | --- | --- | --- |
-| 0.1 MVP | Reader, raw/JSON Lines parser, regex compiler/VM, simple equality filter, CLI text sink | Implemented; Windows, Linux, and macOS suites are reported passing; formal memory and throughput gates remain. |
+| 0.1 MVP | Reader, raw/JSON Lines parser, regex compiler/VM, simple equality filter, CLI text sink | Implemented; Windows, Linux, and macOS suites are reported passing; the Windows 1 GiB benchmark and RSS target pass. |
 | 0.2 implemented | Syslog/HTTP/custom parsers, detection, filter-expression compiler | Core CLI checks pass on Windows and Linux; broader golden fixtures remain part of release hardening. |
 | 0.3 implemented | CSV/text export, exact record/level statistics, timeline, bounded estimates | Windows tests pass; large sample tests also pass on Linux. |
 | 0.4 implemented | Batch follow controller | Windows and Linux append/partial/truncate/from-start/rotation/Ctrl-C tests pass. |

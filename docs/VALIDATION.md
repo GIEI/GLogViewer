@@ -1,12 +1,12 @@
 # Validation Notes
 
-**Status:** local validation evidence, 2026-10-09. These measurements are observations from one development machine and are not release benchmarks.
+**Status:** local validation evidence, 2026-10-11. Exploratory sample comparisons are observations, not release benchmarks unless explicitly identified below as the formal 1 GiB benchmark.
 
 ## Reader optimization comparison
 
 The line reader now searches each available input-buffer span for LF with `memchr` and appends spans with `memcpy`, instead of handling every byte through the old byte-reader loop. It keeps the reusable 64 KiB input buffer, exact maximum-line behavior, CRLF normalization, source offsets, and oversized-line draining. `tests/test_cli.py` includes refill-boundary and line-limit cases. The full Windows CLI suite passes with this reader.
 
-`tests/benchmark_compare.py` compares a baseline and candidate binary on the available samples. It performs one warm-up per binary, alternates run order for five measured runs, discards stdout, checks exit status and diagnostics, and reports medians and binary hashes. The run on Windows 11 with MSVC `/O2`, on the workstation reported as Ryzen 5800/Radeon RX 6900 XT, produced these preliminary results:
+`tests/benchmark_compare.py` compares a baseline and candidate binary on the available samples. It performs one warm-up per binary, alternates run order for five measured runs, discards stdout, checks exit status and diagnostics, and reports medians and binary hashes. The Windows run with MSVC `/O2` produced these preliminary results:
 
 To repeat the comparison, keep a copy of the old executable, build the candidate as `build/logview.exe`, then run `python tests/benchmark_compare.py build/logview-before.exe build/logview.exe --runs 5 --output build/reader-benchmark.json`.
 
@@ -31,13 +31,17 @@ Build the release candidate from a clean checkout first, then record the actual 
 ```powershell
 python tests\benchmark_release.py build\logview.exe `
   --build-details "MSVC /O2 /std:c11" `
-  --hardware-details "AMD Ryzen 7 5800X, 32 GiB RAM" `
-  --storage-details "J: NVMe SSD, NTFS" `
-  --fixture-directory J:\GLogViewer-benchmark `
+  --hardware-details "CPU and memory details, if approved for publication" `
+  --storage-details "NVMe SSD, NTFS" `
+  --fixture-directory C:\benchmark-fixture `
   --report build\release-benchmark-windows.json
 ```
 
 `--fixture-directory` places the generated input on the volume being measured, even when the checkout and executable are on another drive. On macOS or Linux, pass `build/logview` and describe the compiler flags and input volume in the same way. The default run is the release gate. Smaller `--size-bytes` values are useful only for checking the harness and do not count as benchmark evidence. Save the report with the release validation records and include the full generated input size in any comparison.
+
+### Windows reference result
+
+The clean `17681d5` Windows build was measured with MSVC `/O2 /std:c11`. It scanned a generated 1 GiB raw-text fixture with stdout redirected to the null device, using one warmup followed by five measured scans. The median was **0.679 seconds** (range 0.675–0.682 seconds), or **1.47 GiB/s**. Peak RSS was **4.14 MiB**, below the 64 MiB target. The fixture contains 21,053,761 complete 50-byte records and a 13-byte unterminated final record. This is a single-machine observation, not a cross-platform guarantee. The [redacted benchmark report](benchmarks/windows-reference-2026-10-11.json) contains the run data without workstation identifiers. Its RSS value conservatively includes executable, runtime, and stack memory; it is not a direct heap measurement.
 
 ## Windows CLI validation
 
@@ -70,4 +74,4 @@ Running `--stats` on this sample reported 2,220,000 physical records, 2,219,778 
 
 ## Platform coverage
 
-The CLI suite and large-sample scans have passed on the user's Linux machine with GCC and no compiler warnings. The expanded POSIX suite also passed, covering follow rotation/Ctrl-C behavior and the TUI PTY scenarios. The Windows build and CLI suite pass with MSVC. The user also reported `make clean && make test` passing on macOS with an Apple M5 and 16 GB RAM; all eight available sample files were scanned. GitHub Actions run [38151419386](https://github.com/GIEI/GLogViewer/actions/runs/38151419386) passed clean builds and CLI tests on Windows, Linux, and macOS. Runs [38151709262](https://github.com/GIEI/GLogViewer/actions/runs/38151709262) and [38151810909](https://github.com/GIEI/GLogViewer/actions/runs/38151810909) passed the benchmark harness smoke test on all three platforms. Run [38151899774](https://github.com/GIEI/GLogViewer/actions/runs/38151899774) passed the platform matrix, benchmark smoke tests, and the full CLI suite under AddressSanitizer and UndefinedBehaviorSanitizer on Ubuntu. The workflow uses fixed `windows-2025`, `ubuntu-24.04`, and `macos-15` runner images. The sample's `Linux_` filename describes its log content, not the operating system used to run the Windows checks.
+The CLI suite and large-sample scans have passed on the user's Linux machine with GCC and no compiler warnings. The expanded POSIX suite also passed, covering follow rotation/Ctrl-C behavior and the TUI PTY scenarios. The Windows build and CLI suite pass with MSVC. The user also reported `make clean && make test` passing on macOS; all eight available sample files were scanned. GitHub Actions run [38151419386](https://github.com/GIEI/GLogViewer/actions/runs/38151419386) passed clean builds and CLI tests on Windows, Linux, and macOS. Runs [38151709262](https://github.com/GIEI/GLogViewer/actions/runs/38151709262) and [38151810909](https://github.com/GIEI/GLogViewer/actions/runs/38151810909) passed the benchmark harness smoke test on all three platforms. Run [38151899774](https://github.com/GIEI/GLogViewer/actions/runs/38151899774) passed the first sanitizer job. Run [38152635578](https://github.com/GIEI/GLogViewer/actions/runs/38152635578) passed the buffered-output boundary tests, platform matrix, and Linux AddressSanitizer/UndefinedBehaviorSanitizer suite. Run [38152775603](https://github.com/GIEI/GLogViewer/actions/runs/38152775603) passed the updated benchmark harness and all platform jobs. The workflow uses fixed `windows-2025`, `ubuntu-24.04`, and `macos-15` runner images. The sample's `Linux_` filename describes its log content, not the operating system used to run the Windows checks.

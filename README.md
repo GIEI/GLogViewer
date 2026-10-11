@@ -83,4 +83,4 @@ All repository content and every source comment must be written in English. See 
 
 ## Status and license
 
-Status: `0.5.0-alpha.1`; the formal release benchmark and broader platform validation remain before 1.0. The existing [LICENSE](LICENSE) governs the repository.
+Status: `0.5.0-alpha.1`; the Windows 1 GiB benchmark and automated Windows/Linux/macOS CI gates pass. Broader release hardening, terminal checks, and stable release packaging remain before 1.0. The existing [LICENSE](LICENSE) governs the repository.

@@ -1,0 +1,49 @@
+{
+  "benchmark": "glogviewer-plain-raw-warm-cache-v1",
+  "binary_sha256": "0bbff576a97c261ff252e4cd3ea3115acf788fdf46adf58591b16d96b9a3e8f1",
+  "build_details": "MSVC /O2 /std:c11 via build.bat",
+  "fixture_final_unterminated_bytes": 13,
+  "fixture_full_record_count": 21053761,
+  "fixture_record_size_bytes_including_lf": 51,
+  "input_size_bytes": 1073741824,
+  "measured_runs": [
+    {
+      "elapsed_seconds": 0.6794886999996379,
+      "peak_rss_bytes": 4341760
+    },
+    {
+      "elapsed_seconds": 0.6759719999972731,
+      "peak_rss_bytes": 4341760
+    },
+    {
+      "elapsed_seconds": 0.6822049999973387,
+      "peak_rss_bytes": 4341760
+    },
+    {
+      "elapsed_seconds": 0.6753352999985509,
+      "peak_rss_bytes": 4337664
+    },
+    {
+      "elapsed_seconds": 0.6787083999988681,
+      "peak_rss_bytes": 4341760
+    }
+  ],
+  "median_elapsed_seconds": 0.6787083999988681,
+  "output_destination": "stdout redirected to the null device",
+  "peak_rss_bytes": 4341760,
+  "procedure": "One full warmup scan followed by sequential measured scans.",
+  "source_revision": "17681d5b9e230e3b5435ba9ced0d740cf1c980f1",
+  "source_tree_clean": true,
+  "targets": {
+    "median_under_5_seconds": true,
+    "peak_rss_under_64_mib": true,
+    "rss_note": "Peak resident set size is a conservative proxy for the 64 MiB application-heap target; it includes runtime and stack memory."
+  },
+  "throughput_gib_per_second": 1.4733868035251483,
+  "timestamp_utc": "2026-10-11T17:48:53.798627+02:00",
+  "version": "logview 0.5.0-alpha.1",
+  "warmup": {
+    "elapsed_seconds": 0.691985500001465,
+    "peak_rss_bytes": 4341760
+  }
+}
