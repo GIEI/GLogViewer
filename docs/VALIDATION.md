@@ -22,6 +22,21 @@ The block scanner follows a low-risk first optimization: optimized C library sea
 
 Multithreaded batch filtering remains a follow-up. A safe design needs newline-aligned batches, a bounded work queue, worker-owned parser scratch, and ordered output. The custom parser currently has mutable static state, and the frequent-value statistics sketch depends on record order; these must be addressed or excluded before enabling concurrent parsing. The [GNU Parallel `--pipe-part` design](https://www.gnu.org/software/parallel/parallel_design.html) is a useful reference for file blocks, job limits, and ordered results. The existing benchmark script can measure later changes against these workloads.
 
+## Formal release benchmark
+
+`tests/benchmark_release.py` creates a generated 1 GiB raw-text fixture, performs one full warmup scan and five measured scans, discards standard output, and writes a JSON report with each duration, the median, throughput, operating system, processor, logical CPU count, build details, storage description, and peak RSS. It exits nonzero if the median is not below five seconds or measured peak RSS exceeds 64 MiB. RSS is a conservative proxy for application heap because it includes the executable, runtime, and stacks; report it as RSS rather than as a direct heap measurement.
+
+Build the release candidate from a clean checkout first, then record the actual compiler command and storage device. For example, on Windows:
+
+```powershell
+python tests\benchmark_release.py build\logview.exe `
+  --build-details "MSVC /O2 /std:c11" `
+  --storage-details "J: NVMe SSD, NTFS" `
+  --report build\release-benchmark-windows.json
+```
+
+On macOS or Linux, pass `build/logview` and describe the compiler flags and input volume in the same way. The default run is the release gate. Smaller `--size-bytes` values are useful only for checking the harness and do not count as benchmark evidence. Save the report with the release validation records and include the full generated input size in any comparison.
+
 ## Windows CLI validation
 
 The project uses `build.bat` on Windows; the Makefile targets (`make clean` and `make test`) are for macOS/Linux shells.

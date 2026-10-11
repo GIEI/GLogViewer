@@ -44,3 +44,20 @@ jobs:
       - name: Build and test on macOS and Linux
         if: runner.os != 'Windows'
         run: make clean && make test
+
+      - name: Smoke-test release benchmark on Windows
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: >-
+          python tests\benchmark_release.py build\logview.exe
+          --build-details "GitHub Actions MSVC smoke test"
+          --storage-details "GitHub-hosted temporary disk; smoke test only"
+          --size-bytes 1048576 --runs 1
+
+      - name: Smoke-test release benchmark on macOS and Linux
+        if: runner.os != 'Windows'
+        run: >-
+          python3 tests/benchmark_release.py build/logview
+          --build-details "GitHub Actions C compiler smoke test"
+          --storage-details "GitHub-hosted temporary disk; smoke test only"
+          --size-bytes 1048576 --runs 1
