@@ -1,6 +1,6 @@
 # GLogViewer
 
-GLogViewer is a cross-platform, dependency-free C99 tool for exploring large structured log files from a command line or terminal interface. The executable is `logview`. The batch CLI supports raw and JSON Lines input, syslog RFC 3164/5424, Apache/Nginx access logs, custom patterns, format detection, compound filters, regex, text/CSV export, exact record/level counts, a timestamp timeline, estimated frequent field values, and follow mode with truncation and rotation detection. The TUI supports a bounded viewport, checkpoint-backed navigation and regex search across the full scan, source-line jumps, error/warning jumps, physical context lines, full-record zoom, filter edits, export of filtered/search-matched records, and live follow. The 0.5 interactive milestone is implemented; release validation remains in development. macOS validation is deferred to the 1.0 MVP. See the [roadmap](docs/ROADMAP.md) for remaining work to 1.0.
+GLogViewer is a cross-platform, dependency-free C99 tool for exploring large structured log files from a command line or terminal interface. The executable is `logview`. The batch CLI supports raw and JSON Lines input, syslog RFC 3164/5424, Apache/Nginx access logs, custom patterns, format detection, compound filters, regex, text/CSV export, exact record/level counts, a timestamp timeline, estimated frequent field values, and follow mode with truncation and rotation detection. The TUI supports a bounded viewport, checkpoint-backed navigation and regex search across the full scan, source-line jumps, error/warning jumps, physical context lines, full-record zoom, filter edits, export of filtered/search-matched records, and live follow. The first public release is `0.5.0-alpha.1`; see the [release notes](CHANGELOG.md) and [roadmap](docs/ROADMAP.md) for scope and remaining work to 1.0.
 
 ## Version 1.0 target
 
@@ -28,7 +28,7 @@ make test
 
 On macOS/Linux, `make clean && make test` is also supported when you want to remove the previous executable before testing.
 
-The Linux Makefile and test suite have passed on the user's Linux machine. macOS validation is deferred to the 1.0 MVP. Tests use temporary fixtures under `build/test-tmp`, run targeted checks for the original large samples when present, and perform a full raw streaming scan of every other regular file under `SAMPLES`, including nested folders.
+The CLI test suite has been reported passing on Windows, Linux, and macOS. Tests use temporary fixtures under `build/test-tmp`, run targeted checks for the original large samples when present, and perform a full raw streaming scan of every other regular file under `SAMPLES`, including nested folders. See [validation notes](docs/VALIDATION.md) for the recorded platform results and limitations.
 
 ## CLI examples
 
@@ -81,4 +81,4 @@ All repository content and every source comment must be written in English. See 
 
 ## Status and license
 
-Status: 0.5 interactive milestone implemented; the formal release benchmark and macOS validation remain before 1.0. The existing [LICENSE](LICENSE) governs the repository.
+Status: `0.5.0-alpha.1`; the formal release benchmark and broader platform validation remain before 1.0. The existing [LICENSE](LICENSE) governs the repository.
