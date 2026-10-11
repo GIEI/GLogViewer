@@ -78,7 +78,7 @@ The `--tui` implementation provides a 256-row memory cache, temporary checkpoint
 
 ## 0.9: release candidate and 1.0 decision
 
-Freeze the 1.0 CLI and file-format behavior. Run the full test suite and sanitizer or equivalent checks available per platform; the suite now covers high-cardinality statistics, malformed input, long paths on POSIX, invalid UTF-8 CSV output, and output failures. The Linux sanitizer job passes. Add broader Unicode checks. The Windows 1 GiB reference benchmark is recorded in [validation notes](VALIDATION.md); repeat it when the reference hardware or release build changes.
+Freeze the 1.0 CLI and file-format behavior. Run the full test suite and sanitizer or equivalent checks available per platform; the suite now covers high-cardinality statistics, malformed input, long paths on POSIX, invalid UTF-8 CSV output, valid escaped and literal Unicode JSON, surrogate pairs, malformed UTF-8 classes, and output failures. The Linux sanitizer job passes. The Windows 1 GiB reference benchmark is recorded in [validation notes](VALIDATION.md); repeat it when the reference hardware or release build changes.
 
 The 1.0 release requires:
 

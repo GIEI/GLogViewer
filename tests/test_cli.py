@@ -908,6 +908,54 @@ def main():
         require(b"skipped 3 invalid" in json_diagnostics.stderr,
                 "malformed, duplicate-key, and invalid Unicode JSON should be counted")
 
+        unicode_json = root / "unicode.jsonl"
+        escaped_unicode_record = (
+            b'{"message":"caf\\u00e9 snowman \\u2603 face \\ud83d\\ude00"}\n'
+        )
+        literal_unicode_record = (
+            '{"message":"café snowman ☃ face 😀"}\n'.encode("utf-8")
+        )
+        unicode_json.write_bytes(escaped_unicode_record + literal_unicode_record)
+        unicode_scan = run(binary, str(unicode_json), "--format", "jsonl",
+                           "--regex-field", "message=^caf")
+        require(unicode_scan.returncode == 0 and unicode_scan.stdout ==
+                escaped_unicode_record + literal_unicode_record,
+                "JSON should decode valid Unicode escapes and preserve UTF-8 source records")
+        unicode_csv = root / "unicode.csv"
+        unicode_export = run(binary, str(unicode_json), "--format", "jsonl",
+                             "--export", "csv", "--output", str(unicode_csv),
+                             "--columns", "message")
+        require(unicode_export.returncode == 0,
+                "CSV export should accept decoded BMP and supplementary Unicode characters")
+        with unicode_csv.open("r", encoding="utf-8", newline="") as stream:
+            unicode_rows = list(csv.reader(stream))
+        require(unicode_rows == [
+                    ["message"],
+                    ["café snowman ☃ face 😀"],
+                    ["café snowman ☃ face 😀"],
+                ],
+                "escaped surrogate pairs and equivalent UTF-8 text should decode identically")
+
+        invalid_unicode_json = root / "invalid-unicode.jsonl"
+        invalid_unicode_json.write_bytes(
+            b'{"level":"INFO","message":"valid"}\n'
+            b'{"message":"overlong \xc0\xaf"}\n'
+            b'{"message":"stray continuation \x80"}\n'
+            b'{"message":"truncated \xe2\x82"}\n'
+            b'{"message":"encoded surrogate \xed\xa0\x80"}\n'
+            b'{"message":"above Unicode maximum \xf4\x90\x80\x80"}\n'
+        )
+        invalid_unicode_scan = run(binary, str(invalid_unicode_json), "--format", "jsonl",
+                                   "--filter", "level=INFO")
+        require(invalid_unicode_scan.returncode == 0 and
+                invalid_unicode_scan.stdout == b'{"level":"INFO","message":"valid"}\n' and
+                b"skipped 5 invalid" in invalid_unicode_scan.stderr,
+                "JSON should reject malformed UTF-8 classes while keeping valid records "
+                "(returncode={}, stdout={!r}, stderr={!r})".format(
+                    invalid_unicode_scan.returncode,
+                    invalid_unicode_scan.stdout,
+                    invalid_unicode_scan.stderr))
+
         nested_json = root / "employees-formatted.json"
         nested_records = [
             b'{\n'
