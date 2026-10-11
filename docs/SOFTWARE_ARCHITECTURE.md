@@ -1,6 +1,6 @@
 # Software Architecture
 
-**Status:** 1.0 target architecture. Milestones 0.1–0.5 are implemented; Windows CLI tests and the expanded Linux PTY suite have passed. Formal release benchmarking, broader platform validation, and macOS testing remain. The behavioral contract is in [Technical Specification](TECHNICAL_SPECIFICATION.md), and delivery stages are in the [roadmap](ROADMAP.md).
+**Status:** 1.0 target architecture. Milestones 0.1–0.5 are implemented; Windows and Linux test suites have passed, and the user reports the macOS suite passing. Formal release benchmarking and broader release hardening remain. The behavioral contract is in [Technical Specification](TECHNICAL_SPECIFICATION.md), and delivery stages are in the [roadmap](ROADMAP.md).
 
 ## 1. Architectural goals
 
@@ -135,11 +135,11 @@ The core sees `platform_file_open`, `platform_file_seek64`, `platform_file_ident
 
 | Release | Architectural slice | Gate |
 | --- | --- | --- |
-| 0.1 MVP | Reader, raw/JSON Lines parser, regex compiler/VM, simple equality filter, CLI text sink | Implemented; Windows build and CLI checks pass; >1 GiB and macOS/Linux validation remain. |
+| 0.1 MVP | Reader, raw/JSON Lines parser, regex compiler/VM, simple equality filter, CLI text sink | Implemented; Windows, Linux, and macOS suites are reported passing; formal memory and throughput gates remain. |
 | 0.2 implemented | Syslog/HTTP/custom parsers, detection, filter-expression compiler | Core CLI checks pass on Windows and Linux; broader golden fixtures remain part of release hardening. |
 | 0.3 implemented | CSV/text export, exact record/level statistics, timeline, bounded estimates | Windows tests pass; large sample tests also pass on Linux. |
 | 0.4 implemented | Batch follow controller | Windows and Linux append/partial/truncate/from-start/rotation/Ctrl-C tests pass. |
-| 0.5 complete | TUI with bounded viewport, full-scan navigation, search, filters, context, and follow | Windows build and non-terminal checks pass; expanded Linux PTY scenario passes. Manual Windows Terminal and macOS checks remain in release validation. |
+| 0.5 complete | TUI with bounded viewport, full-scan navigation, search, filters, context, and follow | Windows build and non-terminal checks pass; expanded Linux PTY scenario passes; user-reported manual checks cover Windows Terminal and macOS. A repeatable terminal matrix remains in release validation. |
 | 0.9–1.0 | Hardening, benchmark, documentation, release packaging | Published evidence for every 1.0 gate. |
 
 The detailed scope and pass criteria for each release are in [Roadmap to Version 1.0](ROADMAP.md).

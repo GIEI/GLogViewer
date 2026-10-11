@@ -1,6 +1,6 @@
 # User Manual
 
-**Status:** the batch CLI includes the 0.1 MVP, core 0.2 formats/filters, 0.3 reporting, and 0.4 follow features. The 0.5 TUI supports full-scan navigation using temporary checkpoints, filter editing, context view, export of filtered/search-matched records, and live follow; Windows CLI tests and the Linux PTY suite have passed. macOS validation and the formal release benchmark remain for the 1.0 MVP. The [roadmap](ROADMAP.md) gives implementation status and release gates.
+**Status:** the batch CLI includes the 0.1 MVP, core 0.2 formats/filters, 0.3 reporting, and 0.4 follow features. The 0.5 TUI supports full-scan navigation using temporary checkpoints, filter editing, context view, export of filtered/search-matched records, and live follow; Windows and Linux test suites have passed, and the user reports the macOS suite passing. The formal release benchmark and broader release hardening remain for 1.0. The [roadmap](ROADMAP.md) gives implementation status and release gates.
 
 ## 1. What the tool will do
 

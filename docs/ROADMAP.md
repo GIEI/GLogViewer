@@ -1,6 +1,6 @@
 # Roadmap to Version 1.0
 
-**Status:** release plan, 2026-10-08. The 0.1 MVP, core 0.2 formats/filters, 0.3 reporting, 0.4 follow, and 0.5 interactive exploration milestones are implemented. Windows CLI tests and the expanded Linux PTY suite have passed. The formal 1 GiB release benchmark, broader platform checks, and macOS validation remain. See [validation notes](VALIDATION.md). This roadmap stages the [1.0 technical contract](TECHNICAL_SPECIFICATION.md).
+**Status:** release plan, 2026-10-11. The 0.1–0.5 milestones are implemented. The CLI suite is reported passing on Windows, Linux, and macOS; the expanded Linux PTY suite has passed. A GitHub Actions matrix now builds and tests all three platforms on pushes and pull requests; its first run is pending. The formal 1 GiB release benchmark and broader release hardening remain. See [validation notes](VALIDATION.md). This roadmap stages the [1.0 technical contract](TECHNICAL_SPECIFICATION.md).
 
 ## Product decision
 
@@ -74,7 +74,7 @@ The implementation adds `--follow`, `--from-start`, and `--flush-partial` for ba
 
 The `--tui` implementation provides a 256-row memory cache, temporary checkpoints, navigation and regex search across the full scan, error/warning jumps, context view, scrollable full-record zoom, follow mode with append/partial-line/rotation handling, row highlighting, dynamic filter/raw-regex edits with a rescan, resize handling, help, and terminal restoration. Rows keep at most 1 KiB of display text; search is limited to each row's displayed preview. Broader terminal behavior remains. Unsupported non-interactive streams fail clearly; log control bytes are sanitized.
 
-**Gate:** Windows build and non-terminal rejection tests pass. The expanded Linux PTY scenario passes and exercises historical search, severity jumps, context, resize, invalid filter edits, bounded previews for long lines, terminal restoration, TUI follow appends, partial records, and rotation. Manual usability checks on Windows Terminal and macOS remain part of release validation.
+**Gate:** Windows build and non-terminal rejection tests pass. The expanded Linux PTY scenario passes and exercises historical search, severity jumps, context, resize, invalid filter edits, bounded previews for long lines, terminal restoration, TUI follow appends, partial records, and rotation. User-reported manual checks cover Windows Terminal and macOS; a repeatable terminal matrix remains part of release validation.
 
 ## 0.9: release candidate and 1.0 decision
 

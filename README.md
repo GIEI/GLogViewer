@@ -30,6 +30,8 @@ On macOS/Linux, `make clean && make test` is also supported when you want to rem
 
 The CLI test suite has been reported passing on Windows, Linux, and macOS. Tests use temporary fixtures under `build/test-tmp`, run targeted checks for the original large samples when present, and perform a full raw streaming scan of every other regular file under `SAMPLES`, including nested folders. See [validation notes](docs/VALIDATION.md) for the recorded platform results and limitations.
 
+GitHub Actions builds the project and runs the CLI suite on Windows, Linux, and macOS for pushes and pull requests. Large sample datasets are user-provided and are not included in the repository; CI runs the generated fixtures and scans sample files only when present.
+
 ## CLI examples
 
 ```text
