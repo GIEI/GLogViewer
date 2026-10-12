@@ -1,6 +1,6 @@
-# Roadmap to Version 1.0
+# GLogViewer Product Roadmap
 
-**Status:** release plan, 2026-10-11. Version 1.0.0 is published as a stable GitHub release. All 1.0 acceptance gates have evidence: Windows, Linux, and macOS build/test/package CI, Linux sanitizers, parser and follow regressions, user-reported manual TUI checks on Windows/macOS, and the Windows 1 GiB benchmark. The tag workflow [38155296731](https://github.com/GIEI/GLogViewer/actions/runs/38155296731) passed and published platform archives with SHA-256 checksums and signed GitHub build-provenance attestations. See [validation notes](VALIDATION.md).
+**Status:** Version 1.0.0 is stable and 1.1.0 is the latest published release. Version 1.3.0 is implemented locally on Windows and awaits Linux/macOS, sanitizer, and package release gates. This roadmap preserves release history and defines the post-1.3 direction. See the [implementation plan](IMPLEMENTATION_PLAN.md) and [validation notes](VALIDATION.md).
 
 ## Product decision
 
@@ -21,6 +21,21 @@ All releases keep the project language policy in [AGENTS.md](../AGENTS.md): all 
 | **1.0 Stable** | Deliver a documented cross-platform tool. | Signed/tagged source release and platform binaries where feasible, final manual and changelog. | All 1.0 acceptance gates below pass and artifacts match the documented behavior. |
 
 The numbers identify capability milestones, not calendar dates. A stage is complete only after its exit gate passes; unfinished work remains in that stage rather than being silently deferred.
+
+## Recent milestones and post-1.3 roadmap
+
+The 1.2 scope was implemented locally and the 1.3 scope is now implemented and tested on Windows. The next milestones prioritize cross-file analysis. Each release is complete only when its exit gate passes on Windows, Linux, and macOS.
+
+| Release | User-visible outcome | Main additions | Exit gate |
+| --- | --- | --- | --- |
+| **1.2 Structured inspection** | Read and summarize structured records without losing the original evidence. | Pretty-printed JSON; focused field-value statistics; navigable TUI histogram; explicit year and timezone for RFC 3164 timestamp analysis. | Implemented and locally tested on Windows; Linux/macOS PTY runs, Linux sanitizers, and release package checks remain before publication. |
+| **1.3 Investigation workflow** | Return to useful evidence and repeat a prior investigation. | TUI source-line bookmarks; versioned query profiles; configurable context before and after a match. | Windows build and CLI suite pass locally; POSIX PTY coverage, Linux sanitizers, and release package checks remain before publication. |
+| **1.4 Multi-file analysis** | Correlate events across related files in chronological order. | Multiple input files, source-file labels, timestamp ordering, and explicit handling of records without usable timestamps. | Cross-file ordering and tie behavior are documented and tested; bounded-memory behavior is measured; follow/rotation semantics are defined for multiple inputs; platform CI passes. |
+| **1.x Format expansion** | Inspect more operational data with the same local workflow. | Compressed input and additional container formats, selected by demand and dependency review. | Format fixtures, malformed-input behavior, portability, license/dependency review, and large-file performance are documented before inclusion. |
+
+Version 1.3 adds repeatable query profiles, source-line bookmarks, and adjustable context. Windows build and CLI verification are complete locally; Linux/macOS PTY runs, Linux sanitizers, and package checks remain required for the release gate. See the [implementation plan](IMPLEMENTATION_PLAN.md) and [release changelog](../CHANGELOG.md).
+
+Version 1.2 extends the 1.1 statistics and full-record inspection with focused field summaries, a navigable TUI histogram, and readable JSON presentation. It does not change source records or export content. See [implementation plan](IMPLEMENTATION_PLAN.md) for implementation and acceptance details.
 
 ## 0.1 MVP: exact scope
 

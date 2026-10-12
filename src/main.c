@@ -21,8 +21,9 @@
 #include <windows.h>
 #endif
 
-#define LOGVIEW_VERSION "1.1.0"
+#define LOGVIEW_VERSION "1.3.0"
 #define FIELD_NAME_CAPACITY 256
+#define PROFILE_VALUE_CAPACITY 4096
 
 typedef struct {
     const char *input_path;
@@ -39,6 +40,11 @@ typedef struct {
     int export_set;
     int force_output;
     int stats_mode;
+    int stats_flag_set;
+    const char *stats_field_argument;
+    unsigned syslog_year;
+    int syslog_timezone_offset_seconds;
+    int syslog_timezone_set;
     int follow_mode;
     int from_start;
     int flush_partial;
@@ -46,6 +52,17 @@ typedef struct {
     size_t result_limit;
     int bottom_limit;
     int record_mode;
+    size_t context_before;
+    size_t context_after;
+    int context_before_set;
+    int context_after_set;
+    const char *profile_path;
+    const char *save_profile_path;
+    int profile_overwrite;
+    char profile_pattern[PROFILE_VALUE_CAPACITY];
+    char profile_filter[PROFILE_VALUE_CAPACITY];
+    char profile_regex[PROFILE_VALUE_CAPACITY];
+    char profile_field_regex[PROFILE_VALUE_CAPACITY];
 } Options;
 
 typedef struct {
@@ -68,7 +85,11 @@ static void print_usage(FILE *stream)
           "                [--regex pattern] [--regex-field field=pattern]\n"
           "                [--export text|csv --output path [--columns list] [--force]]\n"
           "                [--stats]\n"
+          "                [--stats-field FIELD]\n"
+          "                [--syslog-year YYYY] [--syslog-timezone +/-HH:MM]\n"
           "                [--top count | --bottom count] [--record first|last]\n"
+          "                [--context-before count] [--context-after count]\n"
+          "                [--profile file] [--save-profile file [--profile-overwrite]]\n"
           "                [--follow [--from-start] [--flush-partial]]\n"
           "                [--tui]\n"
           "                [--max-line-bytes count]\n"
@@ -86,9 +107,17 @@ static void print_usage(FILE *stream)
           "  --columns list           Set CSV columns (comma-separated field names).\n"
           "  --force                  Replace an existing export destination.\n"
           "  --stats                  Print exact record and level counts.\n"
+          "  --stats-field FIELD      Focus frequent-value statistics on one field.\n"
+          "  --syslog-year YYYY       Supply the year missing from RFC 3164 timestamps.\n"
+          "  --syslog-timezone OFFSET Assume this UTC offset for yearless syslog timestamps (default: +00:00).\n"
           "  --top count             Show the first count matching records.\n"
           "  --bottom count          Show the last count matching records.\n"
           "  --record first|last     Print the complete first or last matching record.\n"
+          "  --context-before count  Set TUI context records before selection (max 100).\n"
+          "  --context-after count   Set TUI context records after selection (max 100).\n"
+          "  --profile file          Load versioned query settings; CLI options override them.\n"
+          "  --save-profile file     Save the effective query settings to a profile.\n"
+          "  --profile-overwrite     Allow --save-profile to replace an existing file.\n"
           "  --follow                 Follow appended records until interrupted.\n"
           "  --from-start             Read existing records before following.\n"
           "  --flush-partial          Emit a final incomplete record on Ctrl-C.\n"
@@ -116,6 +145,291 @@ static int parse_unsigned_size(const char *text, size_t maximum, size_t *value)
     return 1;
 }
 
+static int parse_syslog_timezone(const char *text, int *offset_seconds)
+{
+    unsigned hours;
+    unsigned minutes;
+    int sign;
+    if (text == NULL || strlen(text) != 6 ||
+        (text[0] != '+' && text[0] != '-') ||
+        text[1] < '0' || text[1] > '9' ||
+        text[2] < '0' || text[2] > '9' || text[3] != ':' ||
+        text[4] < '0' || text[4] > '9' ||
+        text[5] < '0' || text[5] > '9') return 0;
+    hours = (unsigned)(text[1] - '0') * 10u + (unsigned)(text[2] - '0');
+    minutes = (unsigned)(text[4] - '0') * 10u + (unsigned)(text[5] - '0');
+    if (hours > 23 || minutes > 59) return 0;
+    sign = text[0] == '+' ? 1 : -1;
+    *offset_seconds = sign * (int)(hours * 3600u + minutes * 60u);
+    return 1;
+}
+
+static int parse_context_size(const char *text, size_t *value)
+{
+    char *end = NULL;
+    unsigned long parsed;
+    errno = 0;
+    if (text == NULL || *text == '\0' || *text == '-') return 0;
+    parsed = strtoul(text, &end, 10);
+    if (errno != 0 || end == text || *end != '\0' || parsed > 100) return 0;
+    *value = (size_t)parsed;
+    return 1;
+}
+
+static const char *profile_format_name(InputFormat format)
+{
+    switch (format) {
+    case FORMAT_RAW: return "raw";
+    case FORMAT_JSONL: return "jsonl";
+    case FORMAT_SYSLOG3164: return "syslog3164";
+    case FORMAT_SYSLOG5424: return "syslog5424";
+    case FORMAT_APACHE_COMMON: return "apache-common";
+    case FORMAT_APACHE_COMBINED: return "apache-combined";
+    case FORMAT_NGINX_COMBINED: return "nginx-combined";
+    case FORMAT_CUSTOM: return "custom";
+    case FORMAT_AUTO: return "auto";
+    default: return NULL;
+    }
+}
+
+static int profile_copy_value(char *destination, size_t capacity,
+                              const char *value)
+{
+    size_t length = strlen(value);
+    if (length >= capacity || strchr(value, '\n') != NULL ||
+        strchr(value, '\r') != NULL) return 0;
+    memcpy(destination, value, length + 1);
+    return 1;
+}
+
+static int load_query_profile(Options *options)
+{
+    FILE *file;
+    char line[PROFILE_VALUE_CAPACITY + 32];
+    unsigned int seen = 0;
+    int line_number = 0;
+    unsigned int profile_year = 0;
+    int profile_year_set = 0;
+    int timezone_set = 0;
+    int profile_timezone = 0;
+    size_t profile_before = 4;
+    size_t profile_after = 4;
+    int before_set = 0;
+    int after_set = 0;
+    file = fopen(options->profile_path, "rb");
+    if (file == NULL) {
+        fprintf(stderr, "logview: cannot open query profile '%s'.\n",
+                options->profile_path);
+        return 0;
+    }
+    if (fgets(line, sizeof(line), file) == NULL) {
+        fclose(file);
+        fprintf(stderr, "logview: '%s' is not a supported query profile (expected GLOGVIEW_PROFILE 1).\n",
+                options->profile_path);
+        return 0;
+    }
+    line[strcspn(line, "\r\n")] = '\0';
+    if (strcmp(line, "GLOGVIEW_PROFILE 1") != 0) {
+        fclose(file);
+        fprintf(stderr, "logview: '%s' is not a supported query profile (expected GLOGVIEW_PROFILE 1).\n",
+                options->profile_path);
+        return 0;
+    }
+    while (fgets(line, sizeof(line), file) != NULL) {
+        char *separator;
+        char *value;
+        unsigned int bit;
+        size_t line_length;
+        line_number++;
+        if (strchr(line, '\n') == NULL && !feof(file)) {
+            fclose(file);
+            fprintf(stderr, "logview: query profile line %d is too long.\n",
+                    line_number + 1);
+            return 0;
+        }
+        line_length = strlen(line);
+        if (line_length != 0 && line[line_length - 1] == '\n') {
+            line[--line_length] = '\0';
+            if (line_length != 0 && line[line_length - 1] == '\r') {
+                line[--line_length] = '\0';
+            }
+        }
+        if (strchr(line, '\r') != NULL || strchr(line, '\n') != NULL) {
+            goto invalid_profile;
+        }
+        if (line[0] == '\0') continue;
+        separator = strchr(line, '=');
+        if (separator == NULL) goto invalid_profile;
+        *separator = '\0';
+        value = separator + 1;
+        if (strcmp(line, "format") == 0) bit = 1u << 0;
+        else if (strcmp(line, "pattern") == 0) bit = 1u << 1;
+        else if (strcmp(line, "filter") == 0) bit = 1u << 2;
+        else if (strcmp(line, "regex") == 0) bit = 1u << 3;
+        else if (strcmp(line, "regex_field") == 0) bit = 1u << 4;
+        else if (strcmp(line, "syslog_year") == 0) bit = 1u << 5;
+        else if (strcmp(line, "syslog_timezone") == 0) bit = 1u << 6;
+        else if (strcmp(line, "context_before") == 0) bit = 1u << 7;
+        else if (strcmp(line, "context_after") == 0) bit = 1u << 8;
+        else goto invalid_profile;
+        if ((seen & bit) != 0) goto invalid_profile;
+        seen |= bit;
+        if (bit == (1u << 0)) {
+            InputFormat parsed = parser_format_from_name(value);
+            if ((int)parsed < 0) goto invalid_profile;
+            if (!options->format_set) {
+                options->format = parsed;
+                options->format_set = 1;
+            }
+        } else if (bit == (1u << 1)) {
+            if (!profile_copy_value(options->profile_pattern,
+                                    sizeof(options->profile_pattern), value)) goto invalid_profile;
+        } else if (bit == (1u << 2)) {
+            if (!profile_copy_value(options->profile_filter,
+                                    sizeof(options->profile_filter), value)) goto invalid_profile;
+        } else if (bit == (1u << 3)) {
+            if (!profile_copy_value(options->profile_regex,
+                                    sizeof(options->profile_regex), value)) goto invalid_profile;
+        } else if (bit == (1u << 4)) {
+            if (!profile_copy_value(options->profile_field_regex,
+                                    sizeof(options->profile_field_regex), value)) goto invalid_profile;
+        } else if (bit == (1u << 5)) {
+            char *end = NULL;
+            unsigned long year;
+            errno = 0;
+            year = strtoul(value, &end, 10);
+            if (errno != 0 || end == value || *end != '\0' || year > 9999) goto invalid_profile;
+            profile_year = (unsigned int)year;
+            profile_year_set = year != 0;
+        } else if (bit == (1u << 6)) {
+            if (value[0] != '\0') {
+                if (!parse_syslog_timezone(value, &profile_timezone)) goto invalid_profile;
+                timezone_set = 1;
+            }
+        } else if (bit == (1u << 7)) {
+            if (!parse_context_size(value, &profile_before)) goto invalid_profile;
+            before_set = 1;
+        } else if (bit == (1u << 8)) {
+            if (!parse_context_size(value, &profile_after)) goto invalid_profile;
+            after_set = 1;
+        }
+    }
+    if (ferror(file)) {
+        fclose(file);
+        fprintf(stderr, "logview: error reading query profile '%s'.\n",
+                options->profile_path);
+        return 0;
+    }
+    fclose(file);
+    if ((seen & (1u << 0)) == 0) {
+        fprintf(stderr, "logview: query profile '%s' does not define format.\n",
+                options->profile_path);
+        return 0;
+    }
+    if (options->custom_pattern == NULL && options->profile_pattern[0] != '\0' &&
+        (!options->format_set || options->format == FORMAT_CUSTOM))
+        options->custom_pattern = options->profile_pattern;
+    if (options->filter_argument == NULL && options->profile_filter[0] != '\0')
+        options->filter_argument = options->profile_filter;
+    if (options->raw_regex_argument == NULL && options->profile_regex[0] != '\0')
+        options->raw_regex_argument = options->profile_regex;
+    if (options->field_regex_argument == NULL && options->profile_field_regex[0] != '\0')
+        options->field_regex_argument = options->profile_field_regex;
+    if (profile_year_set && options->syslog_year == 0 &&
+        (!options->format_set || options->format == FORMAT_SYSLOG3164 ||
+         options->format == FORMAT_AUTO)) options->syslog_year = profile_year;
+    if (timezone_set && !options->syslog_timezone_set &&
+        (!options->format_set || options->format == FORMAT_SYSLOG3164 ||
+         options->format == FORMAT_AUTO)) {
+        options->syslog_timezone_offset_seconds = profile_timezone;
+        options->syslog_timezone_set = 1;
+    }
+    if (before_set && !options->context_before_set) options->context_before = profile_before;
+    if (after_set && !options->context_after_set) options->context_after = profile_after;
+    return 1;
+
+invalid_profile:
+    fclose(file);
+    fprintf(stderr, "logview: invalid or unsupported setting on line %d of query profile '%s'.\n",
+            line_number + 1, options->profile_path);
+    return 0;
+}
+
+static int save_query_profile(const Options *options)
+{
+    FILE *existing;
+    FILE *file;
+    const char *format = profile_format_name(options->format);
+    int absolute_timezone = options->syslog_timezone_offset_seconds;
+    char timezone[8];
+    if (strcmp(options->save_profile_path, options->input_path) == 0) {
+        fputs("logview: query profile path must not be the input file.\n", stderr);
+        return 0;
+    }
+    existing = fopen(options->save_profile_path, "rb");
+    if (existing != NULL) {
+        fclose(existing);
+        if (!options->profile_overwrite) {
+            fprintf(stderr, "logview: query profile '%s' already exists; use --profile-overwrite to replace it.\n",
+                    options->save_profile_path);
+            return 0;
+        }
+    }
+    file = fopen(options->save_profile_path, "wb");
+    if (file == NULL) {
+        fprintf(stderr, "logview: cannot write query profile '%s'.\n",
+                options->save_profile_path);
+        return 0;
+    }
+    if (absolute_timezone < 0) absolute_timezone = -absolute_timezone;
+    snprintf(timezone, sizeof(timezone), "%c%02d:%02d",
+             options->syslog_timezone_offset_seconds < 0 ? '-' : '+',
+             absolute_timezone / 3600, (absolute_timezone % 3600) / 60);
+    if ((options->custom_pattern != NULL &&
+         !profile_copy_value((char[PROFILE_VALUE_CAPACITY]){0},
+                             PROFILE_VALUE_CAPACITY, options->custom_pattern)) ||
+        (options->filter_argument != NULL &&
+         !profile_copy_value((char[PROFILE_VALUE_CAPACITY]){0},
+                             PROFILE_VALUE_CAPACITY, options->filter_argument)) ||
+        (options->raw_regex_argument != NULL &&
+         !profile_copy_value((char[PROFILE_VALUE_CAPACITY]){0},
+                             PROFILE_VALUE_CAPACITY, options->raw_regex_argument)) ||
+        (options->field_regex_argument != NULL &&
+         !profile_copy_value((char[PROFILE_VALUE_CAPACITY]){0},
+                             PROFILE_VALUE_CAPACITY, options->field_regex_argument))) {
+        fclose(file);
+        fputs("logview: profile values exceed the supported size or contain newlines.\n", stderr);
+        return 0;
+    }
+    if (format == NULL ||
+        fprintf(file, "GLOGVIEW_PROFILE 1\nformat=%s\npattern=%s\nfilter=%s\nregex=%s\nregex_field=%s\nsyslog_year=%u\nsyslog_timezone=%s\ncontext_before=%u\ncontext_after=%u\n",
+                format,
+                options->custom_pattern == NULL ? "" : options->custom_pattern,
+                options->filter_argument == NULL ? "" : options->filter_argument,
+                options->raw_regex_argument == NULL ? "" : options->raw_regex_argument,
+                options->field_regex_argument == NULL ? "" : options->field_regex_argument,
+                options->syslog_year,
+                options->syslog_timezone_set ? timezone : "",
+                (unsigned)options->context_before,
+                (unsigned)options->context_after) < 0) {
+        fclose(file);
+        fprintf(stderr, "logview: failed to finish query profile '%s'.\n",
+                options->save_profile_path);
+        return 0;
+    }
+    {
+        int write_error = fflush(file) != 0;
+        if (fclose(file) != 0) write_error = 1;
+        if (write_error) {
+        fprintf(stderr, "logview: failed to finish query profile '%s'.\n",
+                options->save_profile_path);
+        return 0;
+        }
+    }
+    fprintf(stderr, "logview: saved query profile '%s'.\n", options->save_profile_path);
+    return 1;
+}
+
 static int seek_file(FILE *file, uint64_t offset)
 {
 #ifdef _WIN32
@@ -133,6 +447,8 @@ static int parse_options(int argc, char **argv, Options *options)
     memset(options, 0, sizeof(*options));
     options->max_line_bytes = LOGVIEW_MAX_LINE_BYTES;
     options->format = FORMAT_RAW;
+    options->context_before = 4;
+    options->context_after = 4;
 
     for (index = 1; index < argc; index++) {
         const char *argument = argv[index];
@@ -205,8 +521,31 @@ static int parse_options(int argc, char **argv, Options *options)
             continue;
         }
         if (strcmp(argument, "--stats") == 0) {
-            if (options->stats_mode) return -1;
+            if (options->stats_flag_set) return -1;
             options->stats_mode = 1;
+            options->stats_flag_set = 1;
+            continue;
+        }
+        if (strcmp(argument, "--stats-field") == 0) {
+            if (++index >= argc || options->stats_field_argument != NULL ||
+                argv[index][0] == '\0') return -1;
+            options->stats_mode = 1;
+            options->stats_field_argument = argv[index];
+            continue;
+        }
+        if (strcmp(argument, "--syslog-year") == 0) {
+            size_t year;
+            if (++index >= argc || options->syslog_year != 0 ||
+                strlen(argv[index]) != 4 ||
+                !parse_unsigned_size(argv[index], 9999, &year)) return -1;
+            options->syslog_year = (unsigned)year;
+            continue;
+        }
+        if (strcmp(argument, "--syslog-timezone") == 0) {
+            if (++index >= argc || options->syslog_timezone_set ||
+                !parse_syslog_timezone(argv[index],
+                                       &options->syslog_timezone_offset_seconds)) return -1;
+            options->syslog_timezone_set = 1;
             continue;
         }
         if (strcmp(argument, "--top") == 0 || strcmp(argument, "--bottom") == 0) {
@@ -221,6 +560,33 @@ static int parse_options(int argc, char **argv, Options *options)
             if (strcmp(argv[index], "first") == 0) options->record_mode = 1;
             else if (strcmp(argv[index], "last") == 0) options->record_mode = 2;
             else return -1;
+            continue;
+        }
+        if (strcmp(argument, "--context-before") == 0 ||
+            strcmp(argument, "--context-after") == 0) {
+            int is_before = strcmp(argument, "--context-before") == 0;
+            size_t *target = strcmp(argument, "--context-before") == 0 ?
+                             &options->context_before : &options->context_after;
+            int *was_set = is_before ? &options->context_before_set :
+                           &options->context_after_set;
+            if (++index >= argc || *was_set ||
+                !parse_context_size(argv[index], target)) return -1;
+            *was_set = 1;
+            continue;
+        }
+        if (strcmp(argument, "--profile") == 0) {
+            if (++index >= argc || options->profile_path != NULL) return -1;
+            options->profile_path = argv[index];
+            continue;
+        }
+        if (strcmp(argument, "--save-profile") == 0) {
+            if (++index >= argc || options->save_profile_path != NULL) return -1;
+            options->save_profile_path = argv[index];
+            continue;
+        }
+        if (strcmp(argument, "--profile-overwrite") == 0) {
+            if (options->profile_overwrite) return -1;
+            options->profile_overwrite = 1;
             continue;
         }
         if (strcmp(argument, "--follow") == 0) {
@@ -262,7 +628,14 @@ static int parse_options(int argc, char **argv, Options *options)
     if (options->input_path == NULL) {
         return -1;
     }
+    if (options->profile_path != NULL && !load_query_profile(options)) return -1;
+    if (options->profile_overwrite && options->save_profile_path == NULL) return -1;
     if ((options->format == FORMAT_CUSTOM) != (options->custom_pattern != NULL)) return -1;
+    if ((options->syslog_year == 0 && options->syslog_timezone_set) ||
+        ((options->syslog_year != 0 || options->syslog_timezone_set) &&
+         (!options->format_set ||
+          (options->format != FORMAT_SYSLOG3164 &&
+           options->format != FORMAT_AUTO)))) return -1;
     if (options->export_set != (options->output_path != NULL) ||
         (options->column_list != NULL &&
          (!options->export_set || options->export_format != OUTPUT_CSV)) ||
@@ -486,6 +859,7 @@ int main(int argc, char **argv)
     Regex *field_regex = NULL;
     Filter *field_filter = NULL;
     LogStats stats;
+    StatsTimestampConfig timestamp_config;
     char regex_field_name[FIELD_NAME_CAPACITY];
     const char *regex_field_pattern = NULL;
     char regex_error[160] = {0};
@@ -524,6 +898,20 @@ int main(int argc, char **argv)
         signal(SIGINT, request_stop);
     }
     stats_init(&stats);
+    timestamp_config.syslog_year = options.syslog_year;
+    timestamp_config.syslog_timezone_offset_seconds =
+        options.syslog_timezone_offset_seconds;
+    if (!stats_set_timestamp_config(&stats, &timestamp_config)) {
+        fputs("logview: invalid syslog timestamp configuration.\n", stderr);
+        return 3;
+    }
+    if (options.stats_field_argument != NULL &&
+        !stats_set_focus_field(&stats,
+                               (const unsigned char *)options.stats_field_argument,
+                               strlen(options.stats_field_argument))) {
+        fputs("logview: invalid --stats-field value.\n", stderr);
+        return 3;
+    }
 
     if (options.filter_argument != NULL) {
         field_filter = filter_compile(options.filter_argument, regex_error,
@@ -567,6 +955,13 @@ int main(int argc, char **argv)
             filter_free(field_filter);
             return 3;
         }
+    }
+
+    if (options.save_profile_path != NULL && !save_query_profile(&options)) {
+        regex_free(raw_regex);
+        regex_free(field_regex);
+        filter_free(field_filter);
+        return 2;
     }
 
     input = open_input_file(options.input_path, !options.tui_mode);
@@ -625,6 +1020,9 @@ int main(int argc, char **argv)
                               &field_filter, &raw_regex, &field_regex,
                               regex_field_name, options.follow_mode,
                               options.result_limit, options.bottom_limit,
+                              options.context_before,
+                              options.context_after,
+                              &timestamp_config,
                               options.input_path,
                               options.input_path);
         goto cleanup;

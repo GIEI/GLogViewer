@@ -1,6 +1,6 @@
 # User Manual
 
-**Status:** GLogViewer 1.1.0 adds lexical range filters, result windows, and full-record CLI inspection to the 1.0 stable release. Tagged Windows, Linux, and macOS builds, tests, sanitizers, packaging, and provenance checks are required before publication. See the [release process](RELEASE_PROCESS.md).
+**Status:** GLogViewer 1.3.0 development adds query profiles, source-line bookmarks, and adjustable TUI context to the 1.2.0 development features. Windows build and tests pass locally; tagged Windows, Linux, and macOS builds, tests, sanitizers, packaging, and provenance checks are required before publication. See the [release process](RELEASE_PROCESS.md).
 
 ## 1. What the tool will do
 
@@ -26,7 +26,7 @@ The current CLI supports one file and these options:
 ```text
 logview <file> [--format FORMAT] [--pattern PATTERN] [--filter EXPRESSION]
                 [--regex pattern] [--regex-field field=pattern]
-                [--stats | --export text|csv --output path]
+                [--stats [--stats-field FIELD] | --export text|csv --output path]
                 [--columns list] [--force]
                 [--follow [--from-start] [--flush-partial]]
                 [--top <count> | --bottom <count>]
@@ -34,7 +34,7 @@ logview <file> [--format FORMAT] [--pattern PATTERN] [--filter EXPRESSION]
                 [--max-line-bytes count]
 ```
 
-`--format raw` is the default. Formats include `raw`, `jsonl`, `syslog3164`, `syslog5424`, `apache-common`, `apache-combined`, `nginx-combined`, `custom`, and `auto`. `--filter` accepts equality, inequality, regex, and lexical range comparisons combined with `and`, `or`, and parentheses. `--regex` searches the entire raw line; `--regex-field` searches a parsed field. These options are combined with `--filter` using AND. `--stats` prints exact record and level counts, a 256-bin timestamp timeline, and estimated frequent field/value pairs. Timestamp aggregation recognizes ISO/RFC 3339 values with `Z` or a numeric offset and Apache Combined timestamps. Timestamps without an explicit timezone or otherwise invalid are counted as unknown. The timeline makes a second streaming pass over the input. `--follow` waits for appended complete lines, detects file truncation and rotation, and handles Ctrl-C. `--export` streams selected records to a text or CSV file. Use `--help` or `--version` to inspect the built program.
+`--format raw` is the default. Formats include `raw`, `jsonl`, `syslog3164`, `syslog5424`, `apache-common`, `apache-combined`, `nginx-combined`, `custom`, and `auto`. `--filter` accepts equality, inequality, regex, and lexical range comparisons combined with `and`, `or`, and parentheses. `--regex` searches the entire raw line; `--regex-field` searches a parsed field. These options are combined with `--filter` using AND. `--stats` prints exact record and level counts, a 256-bin timestamp timeline, and frequent field/value pairs, marking each count exact or estimated. Add `--stats-field FIELD` to show frequent values only for a particular parsed field; it also enables stats mode by itself. Timestamp aggregation recognizes ISO/RFC 3339 values with `Z` or a numeric offset and Apache Combined timestamps. RFC 3164 timestamps need `--syslog-year YYYY`; their timezone defaults to UTC and can be set with `--syslog-timezone +/-HH:MM`. Dates without enough information to interpret them remain unknown. The timeline makes a second streaming pass over the input. `--follow` waits for appended complete lines, detects file truncation and rotation, and handles Ctrl-C. `--export` streams selected records to a text or CSV file. Use `--help` or `--version` to inspect the built program.
 
 The command form below documents the current CLI options. See the [release process](RELEASE_PROCESS.md) for platform archive details and verification.
 
@@ -61,6 +61,8 @@ logview app.log --format jsonl --filter "level=ERROR"
 logview app.log --format jsonl --filter "level=ERROR" --regex "timeout"
 logview access.log --format apache-combined --filter "status=500 or status=502"
 logview syslog.log --format syslog5424 --stats
+logview syslog.log --format syslog3164 --syslog-year 2025 --syslog-timezone +02:00 --stats
+logview app.jsonl --format jsonl --stats-field service
 logview app.log --follow --format jsonl --filter "level=ERROR"
 logview app.log --follow --from-start --flush-partial
 logview app.log --format jsonl --tui
@@ -71,13 +73,15 @@ logview app.log --format jsonl --record first
 logview app.log --format jsonl --record last
 ```
 
+RFC 3164 timestamps contain a month, day, and time, but no year or timezone. To include them in batch timelines and the TUI histogram, supply the year represented by the file with `--syslog-year`. The default assumed timezone is UTC; use `--syslog-timezone` to provide the source's fixed UTC offset, such as `+02:00` or `-07:00`. The offset means local time relative to UTC. The year is applied uniformly to every RFC 3164 timestamp; files spanning a year boundary should be split because rollover is not inferred. These options require `--format syslog3164` or `--format auto` and do not change the original timestamp text or range-filter comparisons.
+
 Quote expressions for the shell. On Windows PowerShell and Unix shells, double quotes around a simple expression work as shown. Escaping embedded quotes differs by shell; place complex expressions in single quotes where supported and verify how your shell passes them.
 
 ## 3. Choose a format
 
 | Input example | Select | Result |
 | --- | --- | --- |
-| `Oct  8 09:15:00 host app[123]: message` | `syslog3164` | Time, host, process, PID, and message. No year or time zone is inferred. |
+| `Oct  8 09:15:00 host app[123]: message` | `syslog3164` | Time, host, process, PID, and message. Add `--syslog-year` and, when needed, `--syslog-timezone` for timeline analysis. |
 | `<34>1 2026-10-08T09:15:00Z host app 123 ID47 - message` | `syslog5424` | RFC 5424 header fields and message. |
 | `192.0.2.4 - - [08/Oct/2026:09:15:00 +0200] "GET / HTTP/1.1" 200 42 "-" "agent"` | `apache-combined` or `nginx-combined` | Client IP, request, status, bytes, referrer, agent. |
 | `{"time":"2026-10-08T09:15:00Z","level":"ERROR","message":"timeout"}` | `jsonl` | Canonical timestamp, level, message plus original keys. |
@@ -118,6 +122,19 @@ logview SAMPLES/crypto_historical_365days_1-level_10-MB_minified.json --format j
 ```
 
 The crypto sample has both a `date` field (`YYYY-MM-DD`) and a `timestamp` field (`YYYY-MM-DD HH:MM:SS`). This half-open interval includes December 10 through December 15, 2024, and excludes December 16. Running the example returns six records. The `date` field keeps the filter argument simple in PowerShell because its values contain no spaces. To filter on `timestamp`, quote each value inside the filter expression: `timestamp>="2024-12-10 00:00:00" and timestamp<"2024-12-16 00:00:00"`.
+
+### Query profiles
+
+Save the effective format and query settings from a command in a versioned profile, then reuse them for batch output or the TUI:
+
+```sh
+logview app.jsonl --format jsonl --filter 'level=ERROR' --regex-field 'message=timeout' --save-profile incident.glogprofile
+logview app.jsonl --profile incident.glogprofile
+logview app.jsonl --profile incident.glogprofile --regex-field 'message=database'
+logview app.jsonl --profile incident.glogprofile --tui
+```
+
+Explicit command-line settings override values loaded from `--profile`. Profile files use the `GLOGVIEW_PROFILE 1` header and plain UTF-8 `key=value` lines. Unknown, duplicate, malformed, or unsupported settings are rejected. Profiles support format, custom pattern, field filter, raw regex, field regex, RFC 3164 year/time zone, and TUI context sizes. A saved profile is never replaced by default; use `--profile-overwrite` together with `--save-profile` to replace it. Profile values cannot contain line breaks.
 
 Range comparisons compare field bytes in lexical order; they do not parse dates or numbers. Fixed-width ISO 8601 timestamps with the same timezone representation sort chronologically. For timestamps with different UTC offsets, normalize the values first. For numbers, use equal-width zero-padded values (for example, `00042`) or a regex suited to the field format.
 
@@ -160,7 +177,7 @@ Text export writes each selected record's original content followed by LF. CSV d
 logview app.log --format jsonl --stats
 ```
 
-The `--stats` output includes exact physical, parsed, rejected, and selected record counts and exact level counts for selected records. Missing levels are counted as `UNSPECIFIED`. A fixed 256-bin timeline spans the observed unambiguous timestamp range. Timestamp values without an explicit timezone or in unsupported formats are reported under `Unknown timestamps`. The `Frequent field values (estimated)` section reports up to ten leading candidates maintained in fixed memory; the count is approximate and includes an error bound. Statistics cannot be combined with export.
+The `--stats` output includes exact physical, parsed, rejected, and selected record counts and exact level counts for selected records. Missing levels are counted as `UNSPECIFIED`. A fixed 256-bin timeline spans the observed unambiguous timestamp range. Timestamp values without an explicit timezone or in unsupported formats are reported under `Unknown timestamps`. Frequent field/value candidates use a fixed-memory Space-Saving table. Counts with zero error are marked `(exact)`; other candidates are marked `(estimated; error <= N)`. `--stats-field FIELD` limits this section to one field while retaining the record counts, level counts, and timeline. Statistics cannot be combined with export.
 
 ## 8. Terminal interface
 
@@ -180,9 +197,13 @@ logview app.log --format jsonl --tui
 | `n` / `N` | Also go to the next/previous search match. |
 | `e` / `E` | Go to the next/previous error-level record. |
 | `w` / `W` | Go to the next/previous warning-level record. |
-| `c` | Show or hide four physical records before and after the selected record. |
+| `c` | Show or hide the configured number of physical records before and after the selected record. |
+| `b` / `B` | Toggle a bookmark on the selected source line / jump to the next bookmark in source order. |
+| `+` / `-` | Increase / decrease both configured context radii. |
 | `C` | Clear the search, field filter, raw regex, and field regex, then rescan the full input. |
 | `z` | Open a scrollable full-screen view of the complete selected record. Use arrows, Page Up/Page Down, Home/End to scroll; press `z`, Enter, or Esc to close. |
+| `v` | Enter a parsed field name and show up to ten frequent values among records selected by the active field filter and regex predicates. Counts are marked exact or estimated. Press Esc to cancel the scan. |
+| `h` | Build a 256-bin time histogram for selected records. Time runs from oldest at the left to newest at the right, in UTC. The vertical labels are relative volume levels, not months or days; the tallest displayed column is labeled with its record count. `#`, `+`, and `!` mark normal, warning, and error records. Each screen column may group adjacent time buckets. The selected bucket shows its exact record, error, and warning counts plus its UTC time span. Use Left/Right or Up/Down to move between nonempty bins, Home/End for the first/last bin, and Enter to jump to the first matching record in the chosen bin. Unsupported or ambiguous timestamps are counted as unknown. For RFC 3164, launch with `--syslog-year YYYY` and optional `--syslog-timezone +/-HH:MM`. |
 | `f` | Edit the field filter and rescan from the beginning. |
 | `r` | Edit the raw-line regex and rescan from the beginning. |
 | `x` | Export records matching the active filters and search. Press Enter at the path prompt for a numbered filename in the current directory. |
@@ -191,7 +212,13 @@ logview app.log --format jsonl --tui
 
 Use `--follow --tui` to scan the file, then wait for appended complete records. A final incomplete line stays pending until its newline arrives. File rotation or truncation clears the current view and rescans the replacement file. `--flush-partial` is not supported in TUI follow mode. Error and warning jumps use the parsed `level` field when available; HTTP 5xx responses are treated as errors and 4xx responses as warnings. The status line shows scan state and search text. During the initial scan, a spinner and physical/selected record counters update every 65,536 physical records; the result rows appear when scanning completes. The TUI redraws its viewport after a terminal resize. It keeps a 256-row memory cache and stores navigation checkpoints in temporary files so it can reload rows and context from anywhere in the scanned file. The temporary directory must have enough free space for the indexes. Display text is limited to 1 KiB per row and the available terminal width; long previews are clipped inline. Multiline JSON whitespace is compacted to keep each record on one screen row. Searches inspect the stored preview. Search matches are highlighted by row. Press `x` after scanning to export records matching the active filters and current search. Enter a path ending in `.csv` for CSV output; any other extension or no extension writes text. Press Enter without a path to save in the current directory using the input filename with `_1`, `_2`, and increasing numbers before its extension, skipping existing files. For example, `app.log` becomes `app_1.log`, then `app_2.log`. Changing a filter or raw regex rescans the file. Log control characters are displayed safely, without executing terminal escape sequences.
 
+Press `b` to bookmark the selected record's physical source line and `B` to jump to the next bookmark in source order, wrapping to the first. Up to 32 bookmarks are kept for the current TUI session. They refer to source lines, so navigation and search do not change their meaning. A filter or regex rescan clears bookmarks because the selected result set changed; file rotation also clears them. Bookmarks are not persisted after quitting.
+
+Set context size at launch with `--context-before N` and `--context-after N` (0–100; default 4 for each). Press `c` to show or hide context, and `+`/`-` to increase or decrease both values while browsing. Context includes physical source records even when filters exclude them; it does not change filtering or export.
+
 With `--top N` or `--bottom N`, the TUI shows only the first or last N selected records. Source-line jump (`J`) is disabled in this limited view because the displayed sequence does not represent the complete file.
+
+The `v` field summary scans the complete current filtered result set and is available after the initial scan; it does not include the separate interactive search string. The `h` histogram requires a complete scan of a seekable file without `--top` or `--bottom`; it makes two additional streaming passes and is unavailable during follow. If the selected record is JSON, `z` displays a pretty-printed version when the formatted output is within the 16 MiB record limit. Malformed JSON, formatting errors, or larger formatted output fall back to the source text. Filtering, search, and export continue to use original input data.
 
 ## 9. Exit codes and troubleshooting
 

@@ -1,6 +1,6 @@
 # Validation Notes
 
-**Status:** local validation evidence, 2026-10-11. Exploratory sample comparisons are observations, not release benchmarks unless explicitly identified below as the formal 1 GiB benchmark.
+**Status:** local validation evidence, 2026-10-12. Exploratory sample comparisons are observations, not release benchmarks unless explicitly identified below as the formal 1 GiB benchmark.
 
 ## Reader optimization comparison
 
@@ -54,7 +54,7 @@ The following commands completed successfully in the repository workspace:
 python tests\test_cli.py build\logview.exe
 ```
 
-The CLI suite covers help/version output, raw and JSON Lines input, pretty-printed JSON object arrays, nested JSON field paths and leaf aliases, regex constructs and work limits, compound filter precedence, syslog RFC 3164/5424, Apache Common/Combined, custom patterns, format detection, text/CSV export, exact record/level statistics, high-cardinality frequent-value estimates, ISO and Apache timeline parsing, follow append/partial/truncate/from-start behavior, output failures, TUI non-terminal rejection, long lines, and sample files. It runs targeted checks for `enwik8`, `Linux_1GB.syslog`, and `http_access_500MB.log` when present, then performs a full raw streaming scan of every other regular file in `SAMPLES`, including nested folders. POSIX runs additionally test long input paths, rotation, Ctrl-C partial flushing, and PTY search/navigation, invalid filter edits, bounded long-line previews, full-record zoom scrolling, terminal restoration, resize, live follow, and TUI export. The formatted employee sample was also scanned using the `phone=^829` field regex; 337 records matched.
+The CLI suite covers help/version output, raw and JSON Lines input, pretty-printed JSON object arrays, nested JSON field paths and leaf aliases, regex constructs and work limits, compound filter precedence, syslog RFC 3164/5424, Apache Common/Combined, custom patterns, format detection, text/CSV export, exact record/level statistics, high-cardinality frequent-value estimates, ISO and Apache timeline parsing, versioned query profile save/load/override/error/overwrite behavior, follow append/partial/truncate/from-start behavior, output failures, TUI non-terminal rejection, long lines, and sample files. It runs targeted checks for `enwik8`, `Linux_1GB.syslog`, and `http_access_500MB.log` when present, then performs a full raw streaming scan of every other regular file in `SAMPLES`, including nested folders. POSIX runs additionally test long input paths, rotation, Ctrl-C partial flushing, and PTY search/navigation, invalid filter edits, bookmarks and context controls, histogram navigation, bounded long-line previews, full-record zoom scrolling, terminal restoration, resize, live follow, and TUI export. The formatted employee sample was also scanned using the `phone=^829` field regex; 337 records matched.
 
 ## Linux_1GB.syslog sample
 

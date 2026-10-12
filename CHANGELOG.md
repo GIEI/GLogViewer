@@ -1,5 +1,40 @@
 # GLogViewer Changelog
 
+## 1.3.0 (development)
+
+Adds repeatable query workflows and faster return to records of interest.
+
+### Included
+
+- Add versioned `GLOGVIEW_PROFILE 1` query profiles that can be loaded in batch or TUI mode; explicit CLI values take precedence.
+- Refuse profile overwrite unless `--profile-overwrite` is supplied; reject unknown, duplicate, malformed, or unsupported profile settings.
+- Add TUI source-line bookmarks with next-bookmark navigation and explicit clearing when filters or file identity changes.
+- Add `--context-before` and `--context-after` plus interactive `+`/`-` controls for physical context size.
+- Add CLI profile, override, invalid-profile, bookmark, and context coverage.
+
+### Validation status
+
+- Windows C99 build and complete CLI suite pass, including all regular files under `SAMPLES`.
+- Linux/macOS pseudo-terminal tests, Linux sanitizer checks, and release package checks remain required before publication.
+
+## 1.2.0 (development)
+
+Adds readable structured-record inspection and ways to navigate from aggregate statistics to matching data.
+
+### Included
+
+- Pretty-print valid JSON in the TUI full-record view, with a bounded output size and raw-record fallback.
+- Add `--stats-field FIELD` to focus frequent-value statistics on one parsed field.
+- Mark frequent-value counts as exact when their error bound is zero and estimated otherwise.
+- Add the TUI `v` field-value summary and `h` timestamp histogram, including navigation to the first record in a selected bucket.
+- Add `--syslog-year` and `--syslog-timezone` so RFC 3164 timestamps can be included in CLI statistics and the TUI histogram with an explicit year and assumed fixed offset.
+- Add deterministic CLI and POSIX pseudo-terminal coverage for the new behavior.
+
+### Validation status
+
+- Windows C99 build and complete CLI test suite pass, including all available files under `SAMPLES`.
+- Linux and macOS pseudo-terminal tests and Linux sanitizer checks remain required release gates.
+
 ## 1.1.0
 
 Adds date and value range filtering, bounded result windows, and full-record inspection from the command line.

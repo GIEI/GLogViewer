@@ -5,7 +5,9 @@
 #include "tui.h"
 
 #include "follow.h"
+#include "json_pretty.h"
 #include "output.h"
+#include "stats.h"
 #include "terminal.h"
 
 #include <ctype.h>
@@ -14,6 +16,7 @@
 #include <signal.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 
 #ifdef _WIN32
 #include <io.h>
@@ -25,7 +28,8 @@
 #define TUI_CHECKPOINT_ROWS 128
 #define TUI_PREVIEW_BYTES 1024
 #define TUI_QUERY_BYTES 256
-#define TUI_CONTEXT_RADIUS 4
+#define TUI_CONTEXT_MAX 100
+#define TUI_BOOKMARK_CAPACITY 32
 
 enum {
     TUI_LEVEL_NONE,
@@ -85,9 +89,14 @@ typedef struct {
     int search_navigation_progress;
     uint64_t physical_records;
     uint64_t physical_checkpoint_count;
-    TuiContextRow context_rows[TUI_CONTEXT_RADIUS * 2 + 1];
+    TuiContextRow context_rows[TUI_CONTEXT_MAX * 2 + 1];
     size_t context_count;
     uint64_t context_anchor_line;
+    size_t context_before;
+    size_t context_after;
+    uint64_t bookmark_lines[TUI_BOOKMARK_CAPACITY];
+    uint64_t bookmark_sequences[TUI_BOOKMARK_CAPACITY];
+    size_t bookmark_count;
     Regex *search_regex;
     char search_text[TUI_QUERY_BYTES];
     char status[160];
@@ -97,6 +106,22 @@ typedef struct {
     int follow_pending_partial;
     int help_visible;
     int context_visible;
+    int values_visible;
+    int histogram_visible;
+    char summary_field[TUI_QUERY_BYTES];
+    LogStats summary_stats;
+    StatsTimestampConfig timestamp_config;
+    uint64_t histogram_counts[LOGVIEW_TIMELINE_BINS];
+    uint64_t histogram_errors[LOGVIEW_TIMELINE_BINS];
+    uint64_t histogram_warnings[LOGVIEW_TIMELINE_BINS];
+    uint64_t histogram_first_sequence[LOGVIEW_TIMELINE_BINS];
+    uint64_t histogram_first_line[LOGVIEW_TIMELINE_BINS];
+    uint64_t histogram_timestamped;
+    uint64_t histogram_unknown;
+    int64_t histogram_earliest;
+    int64_t histogram_latest;
+    size_t histogram_cursor;
+    int histogram_has_range;
     unsigned int progress_frame;
     int terminal_columns;
     int terminal_rows;
@@ -118,6 +143,24 @@ static int tui_seek(FILE *file, uint64_t offset)
     if (offset > (uint64_t)INT64_MAX) return 0;
     return fseeko(file, (off_t)offset, SEEK_SET) == 0;
 #endif
+}
+
+static int tui_file_size(FILE *file, uint64_t *size)
+{
+#ifdef _WIN32
+    __int64 position;
+    if (_fseeki64(file, 0, SEEK_END) != 0) return 0;
+    position = _ftelli64(file);
+    if (position < 0) return 0;
+    *size = (uint64_t)position;
+#else
+    off_t position;
+    if (fseeko(file, 0, SEEK_END) != 0) return 0;
+    position = ftello(file);
+    if (position < 0) return 0;
+    *size = (uint64_t)position;
+#endif
+    return tui_seek(file, 0);
 }
 
 static int read_checkpoint(TuiState *state, uint64_t sequence,
@@ -407,10 +450,10 @@ static int load_context(TuiState *state)
         !ensure_sequence(state, state->cursor)) return 0;
     anchor = row_at(state, state->cursor);
     if (anchor == NULL || anchor->line_number == 0) return 0;
-    first_line = anchor->line_number > TUI_CONTEXT_RADIUS ?
-                 anchor->line_number - TUI_CONTEXT_RADIUS : 1;
-    last_line = anchor->line_number > UINT64_MAX - TUI_CONTEXT_RADIUS ?
-                UINT64_MAX : anchor->line_number + TUI_CONTEXT_RADIUS;
+    first_line = anchor->line_number > state->context_before ?
+                 anchor->line_number - state->context_before : 1;
+    last_line = anchor->line_number > UINT64_MAX - state->context_after ?
+                UINT64_MAX : anchor->line_number + state->context_after;
     if (!read_physical_checkpoint(state, first_line, &checkpoint) ||
         !reader_reposition(state->reader, checkpoint.byte_offset,
                            checkpoint.line_number - 1)) return 0;
@@ -428,7 +471,7 @@ static int load_context(TuiState *state)
         if (result == READER_EOF) break;
         if (number < first_line) continue;
         if (number > last_line) break;
-        if (state->context_count < TUI_CONTEXT_RADIUS * 2 + 1) {
+        if (state->context_count < TUI_CONTEXT_MAX * 2 + 1) {
             TuiContextRow *row = &state->context_rows[state->context_count++];
             row->line_number = number;
             if (result == READER_TOO_LONG) {
@@ -539,9 +582,95 @@ static int restart_scan(TuiState *state)
     }
     state->scanning = 1;
     state->follow_waiting = 0;
+    if (state->bookmark_count != 0) {
+        state->bookmark_count = 0;
+        snprintf(state->status, sizeof(state->status),
+                 "Filters changed; source-line bookmarks cleared for the new result set");
+        return 1;
+    }
     snprintf(state->status, sizeof(state->status),
              "Scanning file; progress updates every 65,536 records");
     return 1;
+}
+
+static void toggle_bookmark(TuiState *state)
+{
+    TuiRow *row;
+    size_t index;
+    if (state->scanning || state->result_limit != 0 ||
+        !ensure_sequence(state, state->cursor)) {
+        snprintf(state->status, sizeof(state->status),
+                 "Bookmarks require a complete, unlimited result view");
+        return;
+    }
+    row = row_at(state, state->cursor);
+    if (row == NULL) return;
+    for (index = 0; index < state->bookmark_count; index++) {
+        if (state->bookmark_lines[index] == row->line_number) {
+            size_t move;
+            for (move = index + 1; move < state->bookmark_count; move++) {
+                state->bookmark_lines[move - 1] = state->bookmark_lines[move];
+                state->bookmark_sequences[move - 1] = state->bookmark_sequences[move];
+            }
+            state->bookmark_count--;
+            snprintf(state->status, sizeof(state->status),
+                     "Removed bookmark for source line %llu",
+                     (unsigned long long)row->line_number);
+            return;
+        }
+    }
+    if (state->bookmark_count >= TUI_BOOKMARK_CAPACITY) {
+        snprintf(state->status, sizeof(state->status),
+                 "Bookmark limit reached (%u)", TUI_BOOKMARK_CAPACITY);
+        return;
+    }
+    state->bookmark_lines[state->bookmark_count] = row->line_number;
+    state->bookmark_sequences[state->bookmark_count] = state->cursor;
+    state->bookmark_count++;
+    snprintf(state->status, sizeof(state->status),
+             "Bookmarked source line %llu (%u total; press B for next)",
+             (unsigned long long)row->line_number,
+             (unsigned)state->bookmark_count);
+}
+
+static void jump_to_next_bookmark(TuiState *state)
+{
+    size_t index;
+    size_t target = SIZE_MAX;
+    uint64_t next_sequence = UINT64_MAX;
+    uint64_t first_sequence = UINT64_MAX;
+    size_t first_index = SIZE_MAX;
+    if (state->bookmark_count == 0) {
+        snprintf(state->status, sizeof(state->status), "No bookmarks; press b to bookmark this source line");
+        return;
+    }
+    for (index = 0; index < state->bookmark_count; index++) {
+        uint64_t sequence = state->bookmark_sequences[index];
+        if (sequence < oldest_sequence(state) || sequence >= state->total_rows) continue;
+        if (sequence < first_sequence) {
+            first_sequence = sequence;
+            first_index = index;
+        }
+        if (sequence > state->cursor && sequence < next_sequence) {
+            next_sequence = sequence;
+            target = index;
+        }
+    }
+    if (target == SIZE_MAX) target = first_index;
+    if (target != SIZE_MAX && ensure_sequence(state, state->bookmark_sequences[target])) {
+        TuiRow *row = row_at(state, state->bookmark_sequences[target]);
+        if (row != NULL && row->line_number == state->bookmark_lines[target]) {
+            state->cursor = row->sequence;
+            state->context_visible = 0;
+            snprintf(state->status, sizeof(state->status),
+                     "Jumped to bookmark: source line %llu",
+                     (unsigned long long)row->line_number);
+            return;
+        }
+    }
+    state->bookmark_count = 0;
+    snprintf(state->status, sizeof(state->status),
+             "Bookmarks became stale and were cleared");
 }
 
 static size_t record_prefix_width(uint64_t line_number)
@@ -736,13 +865,15 @@ static int zoom_read_offset(FILE *index_file, uint64_t index,
 static void render_zoom(const unsigned char *text, size_t length,
                         uint64_t line_count, uint64_t top,
                         size_t width, int rows,
-                        uint64_t source_line, FILE *zoom_index)
+                        uint64_t source_line, FILE *zoom_index,
+                        int formatted_json)
 {
     uint64_t visible = (uint64_t)(rows > 4 ? rows - 4 : 1);
     uint64_t index;
     fputs("\033[H\033[2J\033[?25l", stdout);
-    printf("Record zoom | source line %llu | display rows %llu-%llu of %llu\n",
+    printf("Record zoom | source line %llu | %s | display rows %llu-%llu of %llu\n",
            (unsigned long long)source_line,
+           formatted_json ? "formatted JSON" : "source text",
            (unsigned long long)(top + 1),
            (unsigned long long)(top + visible < line_count ? top + visible : line_count),
            (unsigned long long)line_count);
@@ -790,7 +921,10 @@ static int zoom_selected_record(TuiState *state)
     FILE *index_file = NULL;
     LineReader zoom_reader;
     const unsigned char *record = NULL;
+    const unsigned char *display_record;
+    unsigned char *pretty_record = NULL;
     size_t record_length = 0;
+    size_t display_length;
     uint64_t line_number = 0;
     uint64_t byte_offset = 0;
     uint64_t line_count = 0;
@@ -800,6 +934,7 @@ static int zoom_selected_record(TuiState *state)
     int redraw = 1;
     int initialized = 0;
     int result_code = 0;
+    int formatted_json = 0;
     ReaderResult result;
     if (state->scanning || state->total_rows == 0) {
         snprintf(state->status, sizeof(state->status),
@@ -839,6 +974,32 @@ static int zoom_selected_record(TuiState *state)
         snprintf(state->status, sizeof(state->status), "Cannot read complete selected record");
         goto cleanup;
     }
+    display_record = record;
+    display_length = record_length;
+    if (state->format == FORMAT_JSONL) {
+        FILE *pretty_file = tmpfile();
+        uint64_t pretty_length = 0;
+        if (pretty_file != NULL &&
+            json_pretty_write(pretty_file, record, record_length,
+                              LOGVIEW_MAX_LINE_BYTES) &&
+            tui_file_size(pretty_file, &pretty_length) &&
+            pretty_length <= LOGVIEW_MAX_LINE_BYTES) {
+            pretty_record = (unsigned char *)malloc(pretty_length == 0 ? 1 :
+                                                     (size_t)pretty_length);
+            if (pretty_record != NULL &&
+                (pretty_length == 0 ||
+                 fread(pretty_record, 1, (size_t)pretty_length,
+                       pretty_file) == (size_t)pretty_length)) {
+                display_record = pretty_record;
+                display_length = (size_t)pretty_length;
+                formatted_json = 1;
+            } else {
+                free(pretty_record);
+                pretty_record = NULL;
+            }
+        }
+        if (pretty_file != NULL) fclose(pretty_file);
+    }
     index_file = tmpfile();
     if (index_file == NULL) {
         snprintf(state->status, sizeof(state->status), "Cannot create zoom line index");
@@ -858,7 +1019,7 @@ static int zoom_selected_record(TuiState *state)
             fclose(index_file);
             index_file = tmpfile();
             if (index_file == NULL ||
-                !zoom_build_index(index_file, record, record_length,
+            !zoom_build_index(index_file, display_record, display_length,
                                   width, &line_count)) {
                 snprintf(state->status, sizeof(state->status), "Cannot index zoom record lines");
                 goto cleanup;
@@ -869,9 +1030,9 @@ static int zoom_selected_record(TuiState *state)
             }
         }
         if (redraw) {
-            render_zoom(record, record_length, line_count, top,
+            render_zoom(display_record, display_length, line_count, top,
                         width, new_rows, row_copy.line_number,
-                        index_file);
+                        index_file, formatted_json);
             rendered_rows = new_rows;
             redraw = 0;
         }
@@ -904,6 +1065,7 @@ static int zoom_selected_record(TuiState *state)
     }
 cleanup:
     if (index_file != NULL) fclose(index_file);
+    free(pretty_record);
     if (initialized) reader_destroy(&zoom_reader);
     if (source != NULL) fclose(source);
     return result_code;
@@ -929,6 +1091,312 @@ static void render_scan_progress(TuiState *state)
     fflush(stdout);
 }
 
+static int record_matches_state(TuiState *state, const unsigned char *line,
+                                size_t length, uint64_t number,
+                                uint64_t offset, LogEntry *entry)
+{
+    if (!parse_record(state->format, state->custom_pattern, state->scratch,
+                      line, length, number, offset, entry)) return 0;
+    return record_selected(entry, line, length, *state->field_filter,
+                           *state->raw_regex, *state->field_regex,
+                           state->regex_field_name);
+}
+
+static int analysis_progress(TuiState *state, const char *task,
+                             uint64_t scanned, int force)
+{
+    int columns;
+    int rows;
+    TerminalKey key;
+    if (!force && (scanned & 65535u) != 0) {
+        if ((scanned & 4095u) != 0) return 1;
+    }
+    terminal_get_size(state->terminal, &columns, &rows);
+    (void)columns;
+    if (force || (scanned & 65535u) == 0) {
+        snprintf(state->status, sizeof(state->status),
+                 "%s: %llu records scanned; Esc cancels",
+                 task, (unsigned long long)scanned);
+        printf("\033[%d;1H\033[2K%s", rows, state->status);
+        fflush(stdout);
+    }
+    key = terminal_read_key(state->terminal, 0);
+    if (key.type == TERMINAL_KEY_ESCAPE) return 0;
+    if (key.type == TERMINAL_KEY_CHARACTER && key.character == 'q') return -1;
+    return 1;
+}
+
+static int collect_field_summary(TuiState *state)
+{
+    uint64_t scanned = 0;
+    int progress;
+    if (state->scanning || state->follow_enabled || state->result_limit != 0) {
+        snprintf(state->status, sizeof(state->status),
+                 "Field summary requires a completed, unlimited file scan");
+        return 0;
+    }
+    if (state->input_path == NULL || strcmp(state->input_path, "-") == 0) {
+        snprintf(state->status, sizeof(state->status),
+                 "Field summary requires a seekable input file");
+        return 0;
+    }
+    if (state->format == FORMAT_RAW) {
+        snprintf(state->status, sizeof(state->status),
+                 "Field summary requires a structured log format");
+        return 0;
+    }
+    if (!terminal_read_line(state->terminal, "Summarize field: ",
+                            state->summary_field,
+                            sizeof(state->summary_field)) ||
+        state->summary_field[0] == '\0') return 0;
+    state->values_visible = 0;
+    state->histogram_visible = 0;
+    stats_init(&state->summary_stats);
+    stats_set_timestamp_config(&state->summary_stats,
+                              &state->timestamp_config);
+    if (!stats_set_focus_field(&state->summary_stats,
+                               (const unsigned char *)state->summary_field,
+                               strlen(state->summary_field)) ||
+        !reader_reposition(state->reader, 0, 0)) {
+        snprintf(state->status, sizeof(state->status),
+                 "Cannot prepare field summary scan");
+        return 0;
+    }
+    progress = analysis_progress(state, "Building field summary", 0, 1);
+    if (progress <= 0) {
+        snprintf(state->status, sizeof(state->status),
+                 progress < 0 ? "Field summary cancelled; quitting" :
+                                "Field summary cancelled");
+        return progress < 0 ? 1 : 0;
+    }
+    for (;;) {
+        const unsigned char *line;
+        size_t length;
+        uint64_t number;
+        uint64_t offset;
+        ReaderResult result = state->format == FORMAT_JSONL ?
+            reader_next_json(state->reader, &line, &length, &number, &offset,
+                             NULL, NULL) :
+            reader_next(state->reader, &line, &length, &number, &offset);
+        if (result == READER_EOF) break;
+        if (result == READER_ERROR) {
+            snprintf(state->status, sizeof(state->status),
+                     "Input error while building field summary");
+            return 0;
+        }
+        if (result == READER_TOO_LONG) {
+            scanned++;
+            progress = analysis_progress(state, "Building field summary",
+                                         scanned, 0);
+            if (progress <= 0) {
+                snprintf(state->status, sizeof(state->status),
+                         progress < 0 ? "Field summary cancelled; quitting" :
+                                        "Field summary cancelled");
+                return progress < 0 ? 1 : 0;
+            }
+            continue;
+        }
+        if (result != READER_LINE) continue;
+        {
+            LogEntry entry;
+            int selected = record_matches_state(state, line, length, number,
+                                                offset, &entry);
+            if (selected < 0) {
+                snprintf(state->status, sizeof(state->status),
+                         "Regex work limit exceeded at line %llu",
+                         (unsigned long long)number);
+                return 0;
+            }
+            if (selected && !stats_selected(&state->summary_stats, &entry)) {
+                snprintf(state->status, sizeof(state->status),
+                         "Field summary counter overflow");
+                return 0;
+            }
+        }
+        scanned++;
+        progress = analysis_progress(state, "Building field summary", scanned, 0);
+        if (progress <= 0) {
+            state->values_visible = 0;
+            snprintf(state->status, sizeof(state->status),
+                     progress < 0 ? "Field summary cancelled; quitting" :
+                                    "Field summary cancelled");
+            return progress < 0 ? 1 : 0;
+        }
+    }
+    reader_reposition(state->reader, 0, 0);
+    state->values_visible = 1;
+    state->context_visible = 0;
+    snprintf(state->status, sizeof(state->status),
+             "Esc or v returns to records");
+    return 0;
+}
+
+static void format_epoch_label(int64_t epoch, char *buffer, size_t capacity)
+{
+    time_t value = (time_t)epoch;
+    struct tm *broken_down = gmtime(&value);
+    if (broken_down == NULL || (int64_t)value != epoch ||
+        strftime(buffer, capacity, "%Y-%m-%d %H:%M:%SZ", broken_down) == 0) {
+        snprintf(buffer, capacity, "%lld", (long long)epoch);
+    }
+}
+
+static int collect_histogram_pass(TuiState *state, int populate,
+                                  uint64_t *scanned)
+{
+    int progress;
+    uint64_t sequence = 0;
+    if (!reader_reposition(state->reader, 0, 0)) return 0;
+    for (;;) {
+        const unsigned char *line;
+        size_t length;
+        uint64_t number;
+        uint64_t offset;
+        ReaderResult result = state->format == FORMAT_JSONL ?
+            reader_next_json(state->reader, &line, &length, &number, &offset,
+                             NULL, NULL) :
+            reader_next(state->reader, &line, &length, &number, &offset);
+        if (result == READER_EOF) return 1;
+        if (result == READER_ERROR) return 0;
+        if (result == READER_TOO_LONG) {
+            (*scanned)++;
+            progress = analysis_progress(state,
+                                         populate ? "Building histogram" :
+                                                    "Finding timestamp range",
+                                         *scanned, 0);
+            if (progress <= 0) return progress;
+            continue;
+        }
+        if (result != READER_LINE) continue;
+        {
+            LogEntry entry;
+            int selected = record_matches_state(state, line, length, number,
+                                                offset, &entry);
+            if (selected < 0) return 0;
+            if (selected) {
+                ByteSpan timestamp;
+                int64_t epoch;
+                if (log_entry_find_field(&entry, "timestamp", &timestamp) &&
+                    stats_timestamp_epoch_configured(
+                        timestamp, &state->timestamp_config, &epoch)) {
+                    if (populate) {
+                        size_t bin = stats_timeline_bin(
+                            epoch, state->histogram_earliest,
+                            state->histogram_latest);
+                        if (state->histogram_counts[bin] == 0) {
+                            state->histogram_first_sequence[bin] = sequence;
+                            state->histogram_first_line[bin] = number;
+                        }
+                        if (state->histogram_counts[bin] != UINT64_MAX) {
+                            state->histogram_counts[bin]++;
+                        }
+                        if (classify_entry(&entry) == TUI_LEVEL_ERROR &&
+                            state->histogram_errors[bin] != UINT64_MAX) {
+                            state->histogram_errors[bin]++;
+                        } else if (classify_entry(&entry) == TUI_LEVEL_WARNING &&
+                                   state->histogram_warnings[bin] != UINT64_MAX) {
+                            state->histogram_warnings[bin]++;
+                        }
+                        state->histogram_timestamped++;
+                    } else {
+                        if (!state->histogram_has_range ||
+                            epoch < state->histogram_earliest) {
+                            state->histogram_earliest = epoch;
+                        }
+                        if (!state->histogram_has_range ||
+                            epoch > state->histogram_latest) {
+                            state->histogram_latest = epoch;
+                        }
+                        state->histogram_has_range = 1;
+                    }
+                } else if (!populate && state->histogram_unknown != UINT64_MAX) {
+                    state->histogram_unknown++;
+                }
+                sequence++;
+            }
+        }
+        (*scanned)++;
+        progress = analysis_progress(state,
+                                     populate ? "Building histogram" :
+                                                "Finding timestamp range",
+                                     *scanned, 0);
+        if (progress <= 0) return progress;
+    }
+}
+
+static int build_histogram(TuiState *state)
+{
+    uint64_t scanned = 0;
+    size_t index;
+    int result;
+    if (state->scanning || state->follow_enabled || state->result_limit != 0) {
+        snprintf(state->status, sizeof(state->status),
+                 "Histogram requires a completed, unlimited file scan");
+        return 0;
+    }
+    if (state->input_path == NULL || strcmp(state->input_path, "-") == 0) {
+        snprintf(state->status, sizeof(state->status),
+                 "Histogram requires a seekable input file");
+        return 0;
+    }
+    state->histogram_visible = 0;
+    state->values_visible = 0;
+    state->histogram_has_range = 0;
+    state->histogram_unknown = 0;
+    state->histogram_timestamped = 0;
+    memset(state->histogram_counts, 0, sizeof(state->histogram_counts));
+    memset(state->histogram_errors, 0, sizeof(state->histogram_errors));
+    memset(state->histogram_warnings, 0, sizeof(state->histogram_warnings));
+    for (index = 0; index < LOGVIEW_TIMELINE_BINS; index++) {
+        state->histogram_first_sequence[index] = UINT64_MAX;
+        state->histogram_first_line[index] = UINT64_MAX;
+    }
+    result = analysis_progress(state, "Finding timestamp range", 0, 1);
+    if (result <= 0) {
+        snprintf(state->status, sizeof(state->status),
+                 result < 0 ? "Histogram scan cancelled; quitting" :
+                              "Histogram scan cancelled");
+        return result < 0 ? 1 : 0;
+    }
+    result = collect_histogram_pass(state, 0, &scanned);
+    if (result <= 0) {
+        snprintf(state->status, sizeof(state->status),
+                 result < 0 ? "Histogram scan cancelled; quitting" :
+                              "Histogram scan failed or cancelled");
+        return result < 0 ? 1 : 0;
+    }
+    if (state->histogram_has_range) {
+        scanned = 0;
+        analysis_progress(state, "Building histogram", 0, 1);
+        result = analysis_progress(state, "Building histogram", 0, 1);
+        if (result <= 0) {
+            snprintf(state->status, sizeof(state->status),
+                     result < 0 ? "Histogram scan cancelled; quitting" :
+                                  "Histogram scan cancelled");
+            return result < 0 ? 1 : 0;
+        }
+        result = collect_histogram_pass(state, 1, &scanned);
+        if (result <= 0) {
+            snprintf(state->status, sizeof(state->status),
+                     result < 0 ? "Histogram scan cancelled; quitting" :
+                                  "Histogram scan failed or cancelled");
+            return result < 0 ? 1 : 0;
+        }
+        for (index = 0; index < LOGVIEW_TIMELINE_BINS; index++) {
+            if (state->histogram_counts[index] != 0) {
+                state->histogram_cursor = index;
+                break;
+            }
+        }
+    }
+    reader_reposition(state->reader, 0, 0);
+    state->histogram_visible = 1;
+    state->context_visible = 0;
+    snprintf(state->status, sizeof(state->status),
+             "Left/Right: bucket  Enter: jump  Esc or h: records");
+    return 0;
+}
+
 static int terminal_size_changed(TuiState *state)
 {
     int columns;
@@ -937,6 +1405,197 @@ static int terminal_size_changed(TuiState *state)
     if (columns < 24) columns = 24;
     if (rows < 5) rows = 5;
     return columns != state->terminal_columns || rows != state->terminal_rows;
+}
+
+static void render_field_summary(TuiState *state, int columns, int rows)
+{
+    size_t indexes[10];
+    size_t count = stats_top_candidates(&state->summary_stats, indexes,
+                                        sizeof(indexes) / sizeof(indexes[0]));
+    size_t index;
+    int visible = rows - 6;
+    if (visible < 0) visible = 0;
+    printf("Field values | %s | selected records: %llu\n\n",
+           state->summary_field,
+           (unsigned long long)state->summary_stats.selected);
+    if (count == 0) {
+        fputs("  No values found for this field in the selected records.\n", stdout);
+    }
+    if (count > (size_t)visible) count = (size_t)visible;
+    for (index = 0; index < count; index++) {
+        const HeavyCandidate *candidate =
+            &state->summary_stats.candidates[indexes[index]];
+        int value_width = columns - 34;
+        if (value_width < 8) value_width = 8;
+        printf("  %2u. ", (unsigned)(index + 1));
+        print_safe(candidate->value, candidate->value_length,
+                   (size_t)value_width,
+                   candidate->value_length > sizeof(candidate->value), 1);
+        printf("  %llu (%s",
+               (unsigned long long)candidate->count,
+               candidate->error == 0 ? "exact" : "estimated");
+        if (candidate->error != 0) {
+            printf("; error <= %llu", (unsigned long long)candidate->error);
+        }
+        fputs(")\n", stdout);
+    }
+    for (index = count + (count == 0 ? 1u : 0u); index < (size_t)(rows - 4); index++) {
+        fputc('\n', stdout);
+    }
+    printf("\033[%d;1H\033[2KEsc or v: close  q: quit", rows - 2);
+}
+
+static uint64_t histogram_group_count(const TuiState *state, size_t first,
+                                      size_t end, int component)
+{
+    size_t index;
+    uint64_t total = 0;
+    for (index = first; index < end; index++) {
+        uint64_t value = component == TUI_LEVEL_ERROR ?
+                         state->histogram_errors[index] :
+                         component == TUI_LEVEL_WARNING ?
+                         state->histogram_warnings[index] :
+                         state->histogram_counts[index];
+        if (UINT64_MAX - total < value) return UINT64_MAX;
+        total += value;
+    }
+    return total;
+}
+
+static void render_histogram(TuiState *state, int columns, int rows)
+{
+    size_t chart_width = columns > 8 ? (size_t)(columns - 4) : 1;
+    int chart_height = rows - 12;
+    uint64_t maximum = 0;
+    size_t column;
+    int level;
+    char earliest[40];
+    char latest[40];
+    if (chart_width > 128) chart_width = 128;
+    if (chart_height < 1) chart_height = 1;
+    if (chart_height > 12) chart_height = 12;
+    for (column = 0; column < chart_width; column++) {
+        size_t first = column * LOGVIEW_TIMELINE_BINS / chart_width;
+        size_t end = (column + 1) * LOGVIEW_TIMELINE_BINS / chart_width;
+        uint64_t count;
+        if (end <= first) end = first + 1;
+        count = histogram_group_count(state, first, end, 0);
+        if (count > maximum) maximum = count;
+    }
+    if (!state->histogram_has_range) {
+        fputs("Time histogram | no selected records have supported timestamps\n\n",
+              stdout);
+        printf("Unknown timestamps: %llu\n",
+               (unsigned long long)state->histogram_unknown);
+    } else {
+        format_epoch_label(state->histogram_earliest, earliest, sizeof(earliest));
+        format_epoch_label(state->histogram_latest, latest, sizeof(latest));
+        printf("Time histogram | %llu timestamped | %llu unknown\n",
+               (unsigned long long)state->histogram_timestamped,
+               (unsigned long long)state->histogram_unknown);
+        printf("UTC time: oldest %s  ->  newest %s\n", earliest, latest);
+        printf("Relative volume (%d levels; tallest column = %llu records)\n",
+               chart_height, (unsigned long long)maximum);
+        fputs("Legend: # normal  + warning  ! error; each column groups time buckets\n",
+              stdout);
+        for (level = chart_height; level > 0; level--) {
+            uint64_t threshold = maximum / (uint64_t)chart_height *
+                                 (uint64_t)level;
+            uint64_t remainder = maximum % (uint64_t)chart_height;
+            if (remainder != 0) {
+                uint64_t adjustment =
+                    (remainder * (uint64_t)level +
+                     (uint64_t)chart_height - 1) / (uint64_t)chart_height;
+                if (UINT64_MAX - threshold < adjustment) threshold = UINT64_MAX;
+                else threshold += adjustment;
+            }
+            printf("%2d |", level);
+            for (column = 0; column < chart_width; column++) {
+                size_t first = column * LOGVIEW_TIMELINE_BINS / chart_width;
+                size_t end = (column + 1) * LOGVIEW_TIMELINE_BINS / chart_width;
+                uint64_t count;
+                char symbol = ' ';
+                int color = 0;
+                int selected;
+                if (end <= first) end = first + 1;
+                count = histogram_group_count(state, first, end, 0);
+                if (count >= threshold && count != 0) {
+                    if (histogram_group_count(state, first, end,
+                                              TUI_LEVEL_ERROR) != 0) {
+                        symbol = '!';
+                        color = 31;
+                    } else if (histogram_group_count(
+                                   state, first, end, TUI_LEVEL_WARNING) != 0) {
+                        symbol = '+';
+                        color = 33;
+                    } else symbol = '#';
+                }
+                selected = state->histogram_cursor >= first &&
+                           state->histogram_cursor < end;
+                if (selected) fputs("\033[7m", stdout);
+                if (color != 0) printf("\033[%dm", color);
+                fputc(symbol, stdout);
+                if (color != 0 || selected) fputs("\033[0m", stdout);
+            }
+            fputs("|\n", stdout);
+        }
+        {
+            size_t first = state->histogram_cursor;
+            uint64_t count = state->histogram_counts[first];
+            uint64_t range = (uint64_t)(state->histogram_latest -
+                                        state->histogram_earliest);
+            int64_t bucket_start = state->histogram_earliest +
+                (int64_t)((range * first) / LOGVIEW_TIMELINE_BINS);
+            int64_t bucket_end = first + 1 == LOGVIEW_TIMELINE_BINS ?
+                state->histogram_latest : state->histogram_earliest +
+                (int64_t)((range * (first + 1)) / LOGVIEW_TIMELINE_BINS);
+            char bucket_start_text[40];
+            char bucket_end_text[40];
+            format_epoch_label(bucket_start, bucket_start_text,
+                               sizeof(bucket_start_text));
+            format_epoch_label(bucket_end, bucket_end_text,
+                               sizeof(bucket_end_text));
+            printf("Bucket %03u | %llu records | errors %llu | warnings %llu | source line %llu\n",
+                   (unsigned)first, (unsigned long long)count,
+                   (unsigned long long)state->histogram_errors[first],
+                   (unsigned long long)state->histogram_warnings[first],
+                   (unsigned long long)(state->histogram_first_line[first] == UINT64_MAX ?
+                                        0 : state->histogram_first_line[first]));
+            printf("Bucket time: %s .. %s\n",
+                   bucket_start_text, bucket_end_text);
+        }
+    }
+}
+
+static void move_histogram_cursor(TuiState *state, int direction)
+{
+    size_t attempt;
+    size_t index = state->histogram_cursor;
+    for (attempt = 0; attempt < LOGVIEW_TIMELINE_BINS; attempt++) {
+        index = direction > 0 ? (index + 1) % LOGVIEW_TIMELINE_BINS :
+                (index == 0 ? LOGVIEW_TIMELINE_BINS - 1 : index - 1);
+        if (state->histogram_counts[index] != 0) {
+            state->histogram_cursor = index;
+            return;
+        }
+    }
+}
+
+static void jump_to_histogram_bucket(TuiState *state)
+{
+    uint64_t sequence =
+        state->histogram_first_sequence[state->histogram_cursor];
+    if (sequence == UINT64_MAX || sequence >= state->total_rows ||
+        !ensure_sequence(state, sequence)) {
+        snprintf(state->status, sizeof(state->status),
+                 "Cannot load the first record in this time bucket");
+        return;
+    }
+    state->cursor = sequence;
+    state->histogram_visible = 0;
+    snprintf(state->status, sizeof(state->status),
+             "Jumped to first record in bucket %03u",
+             (unsigned)state->histogram_cursor);
 }
 
 static void render(TuiState *state)
@@ -982,7 +1641,11 @@ static void render(TuiState *state)
            (state->follow_enabled ? "following" : "complete"),
            (unsigned long long)state->physical_records,
            (unsigned long long)state->total_rows);
-    if (state->scanning) {
+    if (state->values_visible) {
+        render_field_summary(state, columns, rows);
+    } else if (state->histogram_visible) {
+        render_histogram(state, columns, rows);
+    } else if (state->scanning) {
         static const char spinner[] = "|/-\\";
         printf("  Scanning input %c\n",
                spinner[state->progress_frame++ % (sizeof(spinner) - 1)]);
@@ -999,8 +1662,11 @@ static void render(TuiState *state)
               "  Home/End: oldest/newest  /: search  Enter/Shift+Enter: next/previous match\n"
               "  J: jump to a source line (next visible result if filtered)\n"
               "  z: zoom the selected record and scroll through its full contents\n"
+              "  v: summarize values for a structured field  h: time histogram\n"
               "  e/E: next/previous error  w/W: next/previous warning\n"
-              "  c: show/hide context around the selected record\n"
+              "  b: toggle source-line bookmark  B: jump to next bookmark\n"
+              "  c: show/hide context  +/-: change records before and after\n"
+              "  Context defaults to 4 physical records on each side; bookmarks are session-only.\n"
               "  f: edit field filter and rescan  r: edit raw regex and rescan\n"
               "  C: clear search and all filters\n"
               "  x: export filtered/search results (use .csv for CSV)\n"
@@ -1057,7 +1723,7 @@ static void render(TuiState *state)
     printf("\033[%d;1H\033[2K%s%s", rows - 1,
            state->search_text[0] ? "Search: " : "Search: (none) | ",
            state->search_text[0] ? state->search_text :
-           "? help  / search  J jump  f filter  r regex  x export  q quit");
+           "? help  / search  J jump  f filter  r regex  v values  h histogram  x export  q quit");
     printf("\033[%d;1H\033[2K%s", rows, state->status);
     fflush(stdout);
     state->terminal_columns = columns;
@@ -1474,6 +2140,45 @@ static int handle_key(TuiState *state, TerminalKey key, Filter **filter,
     terminal_get_size(state->terminal, &columns, &rows);
     (void)columns;
     page = (uint64_t)(rows > 5 ? rows - 4 : 1);
+    if (state->values_visible) {
+        if (key.type == TERMINAL_KEY_CHARACTER && key.character == 'q') return 1;
+        if (key.type == TERMINAL_KEY_ESCAPE ||
+            (key.type == TERMINAL_KEY_CHARACTER && key.character == 'v')) {
+            state->values_visible = 0;
+            state->status[0] = '\0';
+        }
+        return 0;
+    }
+    if (state->histogram_visible) {
+        if (key.type == TERMINAL_KEY_CHARACTER && key.character == 'q') return 1;
+        if (key.type == TERMINAL_KEY_ESCAPE ||
+            (key.type == TERMINAL_KEY_CHARACTER && key.character == 'h')) {
+            state->histogram_visible = 0;
+            state->status[0] = '\0';
+        } else if (key.type == TERMINAL_KEY_LEFT || key.type == TERMINAL_KEY_UP) {
+            move_histogram_cursor(state, -1);
+        } else if (key.type == TERMINAL_KEY_RIGHT || key.type == TERMINAL_KEY_DOWN) {
+            move_histogram_cursor(state, 1);
+        } else if (key.type == TERMINAL_KEY_HOME || key.type == TERMINAL_KEY_END) {
+            size_t index = key.type == TERMINAL_KEY_HOME ? 0 :
+                           LOGVIEW_TIMELINE_BINS - 1;
+            for (;;) {
+                if (state->histogram_counts[index] != 0) {
+                    state->histogram_cursor = index;
+                    break;
+                }
+                if (key.type == TERMINAL_KEY_HOME) {
+                    if (++index >= LOGVIEW_TIMELINE_BINS) break;
+                } else {
+                    if (index == 0) break;
+                    index--;
+                }
+            }
+        } else if (key.type == TERMINAL_KEY_ENTER) {
+            jump_to_histogram_bucket(state);
+        }
+        return 0;
+    }
     if (state->help_visible) {
         state->help_visible = 0;
         return 0;
@@ -1492,6 +2197,14 @@ static int handle_key(TuiState *state, TerminalKey key, Filter **filter,
         if (key.character == '?') state->help_visible = 1;
         else if (key.character == 'J') jump_to_line(state);
         else if (key.character == 'z') return zoom_selected_record(state);
+        else if (key.character == 'v') {
+            int action = collect_field_summary(state);
+            if (action == 1) return 1;
+        }
+        else if (key.character == 'h') {
+            int action = build_histogram(state);
+            if (action == 1) return 1;
+        }
         else if (key.character == 'C') {
             int changed = state->search_regex != NULL || *filter != NULL ||
                           *raw_regex != NULL || *field_regex != NULL;
@@ -1520,6 +2233,26 @@ static int handle_key(TuiState *state, TerminalKey key, Filter **filter,
                 state->context_visible = !state->context_visible;
                 state->status[0] = '\0';
             }
+        }
+        else if (key.character == 'b') toggle_bookmark(state);
+        else if (key.character == 'B') jump_to_next_bookmark(state);
+        else if (key.character == '+' || key.character == '=') {
+            if (state->context_before < TUI_CONTEXT_MAX) state->context_before++;
+            if (state->context_after < TUI_CONTEXT_MAX) state->context_after++;
+            if (state->context_visible) state->context_count = 0;
+            snprintf(state->status, sizeof(state->status),
+                     "Context size: %u before, %u after",
+                     (unsigned)state->context_before,
+                     (unsigned)state->context_after);
+        }
+        else if (key.character == '-') {
+            if (state->context_before != 0) state->context_before--;
+            if (state->context_after != 0) state->context_after--;
+            if (state->context_visible) state->context_count = 0;
+            snprintf(state->status, sizeof(state->status),
+                     "Context size: %u before, %u after",
+                     (unsigned)state->context_before,
+                     (unsigned)state->context_after);
         }
         else if (key.character == '/') prompt_search(state);
         else if (key.character == 'x') export_view(state);
@@ -1604,13 +2337,18 @@ static int wait_for_follow(TuiState *state, int *should_quit)
         if (follow_result == FOLLOW_ERROR) return -1;
         if (follow_result == FOLLOW_IDLE) continue;
         if (follow_result == FOLLOW_RESTART) {
+            int had_bookmarks = state->bookmark_count != 0;
             if (!reset_indexes(state)) return -1;
+            state->bookmark_count = 0;
             state->scanning = 1;
             state->follow_observed_end = 0;
             state->follow_resume_offset = 0;
             state->follow_line_number_base = 0;
             state->follow_pending_partial = 0;
-            snprintf(state->status, sizeof(state->status), "Log rotated or truncated; rescanning");
+            snprintf(state->status, sizeof(state->status), "%s",
+                     had_bookmarks ?
+                     "Log rotated or truncated; bookmarks cleared and rescanning" :
+                     "Log rotated or truncated; rescanning");
             render(state);
             state->follow_waiting = 0;
             return 1;
@@ -1631,6 +2369,8 @@ int tui_run(FILE **input_file, LineReader *reader, InputFormat format,
             Filter **field_filter, Regex **raw_regex, Regex **field_regex,
             const char *regex_field_name, int follow_enabled,
             size_t result_limit, int bottom_limit,
+            size_t context_before, size_t context_after,
+            const StatsTimestampConfig *timestamp_config,
             const char *input_path,
             const char *follow_path)
 {
@@ -1642,6 +2382,10 @@ int tui_run(FILE **input_file, LineReader *reader, InputFormat format,
     state.physical_index_file = tmpfile();
     state.result_limit = result_limit;
     state.bottom_limit = bottom_limit;
+    state.context_before = context_before > TUI_CONTEXT_MAX ?
+                           TUI_CONTEXT_MAX : context_before;
+    state.context_after = context_after > TUI_CONTEXT_MAX ?
+                          TUI_CONTEXT_MAX : context_after;
     if (result_limit != 0) {
         state.limited_rows = (TuiCheckpoint *)calloc(result_limit,
                                                      sizeof(*state.limited_rows));
@@ -1672,6 +2416,7 @@ int tui_run(FILE **input_file, LineReader *reader, InputFormat format,
     state.follow_enabled = follow_enabled;
     state.input_path = input_path;
     state.follow_path = follow_path;
+    if (timestamp_config != NULL) state.timestamp_config = *timestamp_config;
     if (!terminal_enter(&state.terminal)) {
         fputs("logview: --tui requires an interactive input and output terminal.\n", stderr);
         fclose(state.index_file);

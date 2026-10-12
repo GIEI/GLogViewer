@@ -314,7 +314,9 @@ static int valid_date_time(unsigned year, unsigned month, unsigned day,
     return day >= 1 && day <= maximum_day;
 }
 
-static int timestamp_to_epoch(ByteSpan timestamp, int64_t *epoch)
+int stats_timestamp_epoch_configured(ByteSpan timestamp,
+                                     const StatsTimestampConfig *config,
+                                     int64_t *epoch)
 {
     const unsigned char *data = timestamp.data;
     size_t length = timestamp.length;
@@ -322,6 +324,8 @@ static int timestamp_to_epoch(ByteSpan timestamp, int64_t *epoch)
     unsigned year, month, day, hour, minute, second;
     int offset_seconds = 0;
     int apache = 0;
+
+    if (data == NULL || epoch == NULL) return 0;
 
     if (length >= 20 && data[4] == '-' && data[7] == '-') {
         if (!decimal(data, length, &position, 4, 4, &year) || position >= length || data[position++] != '-' ||
@@ -337,6 +341,32 @@ static int timestamp_to_epoch(ByteSpan timestamp, int64_t *epoch)
         position += 3;
         if (position >= length || data[position++] != '/' ||
             !decimal(data, length, &position, 4, 4, &year) || position >= length || data[position++] != ':' ) return 0;
+    } else if (config != NULL && config->syslog_year != 0 &&
+               length == 15 && data[3] == ' ' && data[6] == ' ' &&
+               data[9] == ':' && data[12] == ':') {
+        int parsed_month = parse_month(data, 0);
+        if (parsed_month == 0) return 0;
+        if (data[4] == ' ' && data[5] >= '0' && data[5] <= '9') {
+            day = data[5] - '0';
+        } else if (data[4] >= '0' && data[4] <= '9' &&
+                   data[5] >= '0' && data[5] <= '9') {
+            day = (unsigned)(data[4] - '0') * 10u +
+                  (unsigned)(data[5] - '0');
+        } else return 0;
+        position = 7;
+        if (!decimal(data, length, &position, 2, 2, &hour) ||
+            position >= length || data[position++] != ':' ||
+            !decimal(data, length, &position, 2, 2, &minute) ||
+            position >= length || data[position++] != ':' ||
+            !decimal(data, length, &position, 2, 2, &second) ||
+            position != length) return 0;
+        year = config->syslog_year;
+        month = (unsigned)parsed_month;
+        if (!valid_date_time(year, month, day, hour, minute, second)) return 0;
+        *epoch = days_from_civil((int)year, month, day) * INT64_C(86400) +
+                 (int64_t)hour * 3600 + (int64_t)minute * 60 +
+                 (int64_t)second - config->syslog_timezone_offset_seconds;
+        return 1;
     } else return 0;
 
     if (!decimal(data, length, &position, 2, 2, &hour) || position >= length || data[position++] != ':' ||
@@ -359,15 +389,40 @@ static int timestamp_to_epoch(ByteSpan timestamp, int64_t *epoch)
     return 1;
 }
 
+int stats_timestamp_epoch(ByteSpan timestamp, int64_t *epoch)
+{
+    return stats_timestamp_epoch_configured(timestamp, NULL, epoch);
+}
+
 static int update_time_range(LogStats *stats, const LogEntry *entry)
 {
     ByteSpan timestamp;
     int64_t epoch;
     if (!log_entry_find_field(entry, "timestamp", &timestamp) ||
-        !timestamp_to_epoch(timestamp, &epoch)) return increment(&stats->unknown_time);
+        !stats_timestamp_epoch_configured(timestamp, &stats->timestamp_config,
+                                          &epoch)) return increment(&stats->unknown_time);
     if (!stats->has_timestamp || epoch < stats->earliest_timestamp) stats->earliest_timestamp = epoch;
     if (!stats->has_timestamp || epoch > stats->latest_timestamp) stats->latest_timestamp = epoch;
     stats->has_timestamp = 1;
+    return 1;
+}
+
+int stats_set_focus_field(LogStats *stats, const unsigned char *field,
+                          size_t field_length)
+{
+    if (stats == NULL || field == NULL || field_length == 0) return 0;
+    stats->focus_field = field;
+    stats->focus_field_length = field_length;
+    return 1;
+}
+
+int stats_set_timestamp_config(LogStats *stats,
+                               const StatsTimestampConfig *config)
+{
+    if (stats == NULL || config == NULL || config->syslog_year > 9999 ||
+        config->syslog_timezone_offset_seconds < -86340 ||
+        config->syslog_timezone_offset_seconds > 86340) return 0;
+    stats->timestamp_config = *config;
     return 1;
 }
 
@@ -382,6 +437,10 @@ int stats_selected(LogStats *stats, const LogEntry *entry)
     }
     if (!add_level(stats, level) || !update_time_range(stats, entry)) return 0;
     for (index = 0; index < entry->field_count; index++) {
+        if (stats->focus_field != NULL &&
+            (entry->fields[index].name.length != stats->focus_field_length ||
+             memcmp(entry->fields[index].name.data, stats->focus_field,
+                    stats->focus_field_length) != 0)) continue;
         if (!add_candidate(stats, entry->fields[index].name.data,
                            entry->fields[index].name.length,
                            entry->fields[index].value.data,
@@ -394,19 +453,27 @@ int stats_timeline_add(LogStats *stats, const LogEntry *entry)
 {
     ByteSpan timestamp;
     int64_t epoch;
-    uint64_t range;
     size_t bin;
     if (!log_entry_find_field(entry, "timestamp", &timestamp) ||
-        !timestamp_to_epoch(timestamp, &epoch)) return 1;
+        !stats_timestamp_epoch_configured(timestamp, &stats->timestamp_config,
+                                          &epoch)) return 1;
     if (!stats->has_timestamp || epoch < stats->earliest_timestamp || epoch > stats->latest_timestamp) return 0;
-    if (stats->earliest_timestamp == stats->latest_timestamp) bin = 0;
-    else {
-        range = (uint64_t)(stats->latest_timestamp - stats->earliest_timestamp);
-        bin = (size_t)(((uint64_t)(epoch - stats->earliest_timestamp) * LOGVIEW_TIMELINE_BINS) / (range + 1));
-        if (bin >= LOGVIEW_TIMELINE_BINS) bin = LOGVIEW_TIMELINE_BINS - 1;
-    }
+    bin = stats_timeline_bin(epoch, stats->earliest_timestamp,
+                             stats->latest_timestamp);
     if (!increment(&stats->timeline[bin]) || !increment(&stats->timestamped)) return 0;
     return 1;
+}
+
+size_t stats_timeline_bin(int64_t epoch, int64_t earliest, int64_t latest)
+{
+    uint64_t range;
+    size_t bin;
+    if (epoch <= earliest || earliest == latest) return 0;
+    if (epoch >= latest) return LOGVIEW_TIMELINE_BINS - 1;
+    range = (uint64_t)(latest - earliest);
+    bin = (size_t)(((uint64_t)(epoch - earliest) * LOGVIEW_TIMELINE_BINS) /
+                   (range + 1));
+    return bin < LOGVIEW_TIMELINE_BINS ? bin : LOGVIEW_TIMELINE_BINS - 1;
 }
 
 static int print_escaped(FILE *stream, const unsigned char *data, size_t length)
@@ -423,21 +490,26 @@ static int print_escaped(FILE *stream, const unsigned char *data, size_t length)
     return 1;
 }
 
-static void select_top_candidates(const LogStats *stats, size_t selected[10], size_t *count)
+size_t stats_top_candidates(const LogStats *stats, size_t *selected,
+                            size_t capacity)
 {
     size_t index;
-    *count = 0;
+    size_t count = 0;
     for (index = 0; index < stats->candidate_count; index++) {
         size_t position = 0;
-        while (position < *count && stats->candidates[selected[position]].count >= stats->candidates[index].count) position++;
-        if (position >= 10) continue;
-        if (*count < 10) (*count)++;
+        while (position < count &&
+               (stats->candidates[selected[position]].count > stats->candidates[index].count ||
+                (stats->candidates[selected[position]].count == stats->candidates[index].count &&
+                 stats->candidates[selected[position]].key_hash <= stats->candidates[index].key_hash))) position++;
+        if (position >= capacity) continue;
+        if (count < capacity) count++;
         {
             size_t move;
-            for (move = *count - 1; move > position; move--) selected[move] = selected[move - 1];
+            for (move = count - 1; move > position; move--) selected[move] = selected[move - 1];
             selected[position] = index;
         }
     }
+    return count;
 }
 
 int stats_print(const LogStats *stats, FILE *stream)
@@ -470,8 +542,15 @@ int stats_print(const LogStats *stats, FILE *stream)
         if (fprintf(stream, "  %03u: %llu\n", (unsigned)index,
                     (unsigned long long)stats->timeline[index]) < 0) return 0;
     }
-    select_top_candidates(stats, top, &top_count);
-    fputs("Frequent field values (estimated):\n", stream);
+    top_count = stats_top_candidates(stats, top, sizeof(top) / sizeof(top[0]));
+    if (stats->focus_field != NULL) {
+        fputs("Frequent values for ", stream);
+        if (!print_escaped(stream, stats->focus_field,
+                           stats->focus_field_length)) return 0;
+        fputs(":\n", stream);
+    } else {
+        fputs("Frequent field values:\n", stream);
+    }
     for (index = 0; index < top_count; index++) {
         const HeavyCandidate *candidate = &stats->candidates[top[index]];
         if (fputs("  ", stream) == EOF ||
@@ -480,9 +559,13 @@ int stats_print(const LogStats *stats, FILE *stream)
             fputc('=', stream) == EOF ||
             !print_escaped(stream, candidate->value,
                            candidate->value_length < HH_VALUE_PREVIEW ? candidate->value_length : HH_VALUE_PREVIEW) ||
-            fprintf(stream, ": %llu (estimated; error <= %llu)%s\n",
+            fprintf(stream, ": %llu (%s",
                     (unsigned long long)candidate->count,
-                    (unsigned long long)candidate->error,
+                    candidate->error == 0 ? "exact" : "estimated") < 0) return 0;
+        if (candidate->error != 0 &&
+            fprintf(stream, "; error <= %llu",
+                    (unsigned long long)candidate->error) < 0) return 0;
+        if (fprintf(stream, ")%s\n",
                     candidate->value_length > HH_VALUE_PREVIEW ? "..." : "") < 0) return 0;
     }
     return fflush(stream) == 0;

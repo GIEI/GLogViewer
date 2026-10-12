@@ -1,6 +1,6 @@
 # GLogViewer
 
-GLogViewer is a cross-platform, dependency-free C99 tool for exploring large structured log files from a command line or terminal interface. The executable is `logview`. The batch CLI supports raw and JSON Lines input, syslog RFC 3164/5424, Apache/Nginx access logs, custom patterns, format detection, compound and range filters, regex, record sampling, text/CSV export, exact record/level counts, timestamp timelines, estimated frequent field values, and follow mode with truncation and rotation detection. The TUI supports bounded result windows, viewport navigation, regex search, source-line jumps, error/warning jumps, physical context lines, full-record zoom, filter edits, export, and live follow. The latest stable release is [1.1.0](https://github.com/GIEI/GLogViewer/releases/tag/v1.1.0); see the [release notes](CHANGELOG.md), [user manual](docs/USER_MANUAL.md), and [known limits](docs/TECHNICAL_SPECIFICATION.md).
+GLogViewer is a cross-platform, dependency-free C99 tool for exploring large structured log files from a command line or terminal interface. The executable is `logview`. The batch CLI supports raw and JSON Lines input, syslog RFC 3164/5424, Apache/Nginx access logs, custom patterns, format detection, compound and range filters, regex, reusable query profiles, record sampling, text/CSV export, exact record/level counts, timestamp timelines, estimated frequent field values, and follow mode with truncation and rotation detection. The TUI supports bounded result windows, viewport navigation, regex search, source-line jumps and bookmarks, error/warning jumps, configurable physical context, formatted JSON zoom, field-value summaries, time histograms, filter edits, export, and live follow. The latest stable release is [1.1.0](https://github.com/GIEI/GLogViewer/releases/tag/v1.1.0); the current development version is 1.3.0. See the [release notes](CHANGELOG.md), [user manual](docs/USER_MANUAL.md), and [known limits](docs/TECHNICAL_SPECIFICATION.md).
 
 ## Features
 
@@ -8,7 +8,7 @@ GLogViewer is a cross-platform, dependency-free C99 tool for exploring large str
 - Parse RFC 3164-like and RFC 5424 syslog, Apache/Nginx access logs, JSON Lines plus pretty-printed JSON object arrays with nested fields, and custom placeholder patterns.
 - Combine equality, regex, and lexical range predicates with an internal regular expression engine.
 - Inspect a full first or last matching record; limit batch or TUI results with `--top N` and `--bottom N`.
-- Browse and search in a terminal UI, follow appended records, export text or CSV, and calculate summary statistics.
+- Browse and search in a terminal UI, inspect pretty-printed JSON, summarize field values, explore timestamp histograms, follow appended records, and export text or CSV.
 - Build on Windows, macOS, and Linux using C99 plus minimal platform console and file APIs.
 
 ## Build
@@ -56,12 +56,16 @@ build\logview.exe SAMPLES\employees_5-level_1-GB_formatted.json --format jsonl -
 
 ## More examples
 
-Text/CSV export, statistics, and follow are available. The TUI uses a bounded row cache and a temporary on-disk checkpoint index for navigation across the full scan. `--top N` and `--bottom N` limit batch or TUI results, while `--record first|last` prints a complete matching record for inspection. Field filters support lexical range operators for sortable values such as fixed-format timestamps. Timestamp timeline output uses a second streaming pass; frequent field/value counts are bounded estimates.
+Text/CSV export, statistics, and follow are available. `--stats-field FIELD` focuses frequent-value output on one parsed field. Save and reload repeatable query settings with `--save-profile incident.glogprofile` and `--profile incident.glogprofile`; explicit CLI options override the loaded profile. In the TUI, press `b` to bookmark a source line and `B` to visit the next bookmark. Press `c` for context; `--context-before N` and `--context-after N` set its initial physical-line range, while `+` and `-` adjust both values. Press `v` to summarize field values and `h` to build a time histogram; select a bucket and press Enter to jump to its first matching record. Press `z` to inspect a complete record; valid JSON is indented for readability while the source and exports remain unchanged. The TUI uses a bounded row cache and a temporary on-disk checkpoint index for navigation across the full scan. `--top N` and `--bottom N` limit batch or TUI results, while `--record first|last` prints a complete matching record for inspection. Field filters support lexical range operators for sortable values such as fixed-format timestamps. Timeline and TUI histogram use additional streaming passes; frequent field/value counts use bounded memory and report exact or estimated counts.
 
 ```text
 logview app.log --format custom --pattern "%{TIMESTAMP:ts} %{LEVEL:lvl} %{MESSAGE:msg}" --filter "level=ERROR" --regex "timeout"
 logview access.log --format apache-combined --filter "status=500 or status=502" --export csv --output errors.csv
 logview app.jsonl --format jsonl --stats
+logview app.jsonl --format jsonl --stats-field service
+logview app.jsonl --format jsonl --filter "level=ERROR" --regex "timeout" --save-profile incident.glogprofile
+logview app.jsonl --profile incident.glogprofile --tui --context-before 8 --context-after 12
+logview syslog.log --format syslog3164 --syslog-year 2025 --syslog-timezone +02:00 --stats
 logview app.jsonl --format jsonl --filter "timestamp>=2026-10-01T00:00:00Z and timestamp<2026-11-01T00:00:00Z" --top 10
 logview app.jsonl --format jsonl --record first
 logview app.jsonl --format jsonl --bottom 10 --tui
@@ -72,7 +76,8 @@ logview --tui app.log
 
 ## Documents
 
-- [Roadmap to 1.0](docs/ROADMAP.md): MVP scope, release sequence, and exit gates.
+- [Product roadmap](docs/ROADMAP.md): release history and planned post-1.2 milestones.
+- [Implementation plan](docs/IMPLEMENTATION_PLAN.md): completed 1.2 and 1.3 scope, validation status, and acceptance criteria for upcoming releases.
 - [Feature catalogue](docs/FEATURES.md): scope, user workflows, competing tools, and priorities.
 - [Technical specification](docs/TECHNICAL_SPECIFICATION.md): syntax, data contracts, limits, performance targets, and acceptance tests.
 - [Software architecture](docs/SOFTWARE_ARCHITECTURE.md): modules, data flow, platform boundaries, and implementation sequence.
@@ -87,6 +92,6 @@ All repository content and every source comment must be written in English. See 
 
 ## Status and license
 
-Status: `1.1.0`; Windows, Linux, and macOS release builds, tests, and package checks must pass before the tag workflow publishes archives with SHA-256 checksums and GitHub artifact attestations. The existing [LICENSE](LICENSE) governs the repository.
+Status: development version `1.3.0`; latest stable release `1.1.0`. The 1.3 changes pass the local Windows build and test suite; Linux/macOS and sanitizer checks must pass before publication. The existing [LICENSE](LICENSE) governs the repository.
 
 See the [release process](docs/RELEASE_PROCESS.md) for the tag-based packaging workflow.

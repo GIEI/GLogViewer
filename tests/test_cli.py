@@ -3,6 +3,7 @@ import csv
 import io
 import json
 import os
+import re
 import signal
 import sys
 import tempfile
@@ -91,11 +92,14 @@ def main():
             all(option in help_result.stdout for option in (
                 b"--format", b"--pattern", b"--filter", b"--regex-field",
                 b"--export", b"--stats", b"--follow", b"--tui",
+                b"--stats-field", b"--syslog-year", b"--syslog-timezone",
+                b"--profile", b"--save-profile", b"--profile-overwrite",
+                b"--context-before", b"--context-after",
                 b"--max-line-bytes", b"--version")),
             "help should list the documented CLI features")
     version_result = run(binary, "--version")
     require(version_result.returncode == 0 and
-            version_result.stdout.startswith(b"logview "),
+            version_result.stdout == b"logview 1.3.0\n",
             "version should print the program name and version")
     scratch_root = Path(__file__).resolve().parents[1] / "build" / "test-tmp"
     scratch_root.mkdir(parents=True, exist_ok=True)
@@ -293,6 +297,55 @@ def main():
             b'{"severity":"ERROR","msg":"timeout"}\n',
             "canonical aliases and field regex should select matching JSON records",
         )
+        profile_path = root / "incident.glogprofile"
+        profile_saved = run(
+            binary, str(json_file), "--format", "jsonl", "--filter", "level=ERROR",
+            "--regex-field", "message=timeout", "--context-before", "0",
+            "--context-after", "2", "--save-profile", str(profile_path),
+        )
+        require(profile_saved.returncode == 0 and
+                b'"message":"connection timeout"' in profile_saved.stdout and
+                profile_path.read_text(encoding="utf-8").startswith("GLOGVIEW_PROFILE 1\n"),
+                "saving a versioned query profile should preserve current filters")
+        profile_loaded = run(binary, str(json_file), "--profile", str(profile_path))
+        require(profile_loaded.returncode == 0 and
+                profile_loaded.stdout == profile_saved.stdout,
+                "a saved query profile should reproduce its batch selection")
+        crlf_profile_path = root / "crlf.glogprofile"
+        crlf_profile_path.write_bytes(profile_path.read_bytes().replace(b"\n", b"\r\n"))
+        crlf_profile = run(binary, str(json_file), "--profile", str(crlf_profile_path))
+        require(crlf_profile.returncode == 0 and
+                crlf_profile.stdout == profile_saved.stdout,
+                "query profiles should be portable across LF and CRLF line endings")
+        profile_override = run(
+            binary, str(json_file), "--profile", str(profile_path),
+            "--regex-field", "message=other",
+        )
+        require(profile_override.returncode == 0 and
+                b'"message":"other"' in profile_override.stdout and
+                b'"message":"connection timeout"' not in profile_override.stdout,
+                "explicit command-line filters should override loaded profile values")
+        profile_refused = run(
+            binary, str(json_file), "--profile", str(profile_path),
+            "--save-profile", str(profile_path),
+        )
+        require(profile_refused.returncode == 2 and b"already exists" in profile_refused.stderr,
+                "saving a profile should refuse to overwrite by default")
+        profile_replaced = run(
+            binary, str(json_file), "--profile", str(profile_path),
+            "--save-profile", str(profile_path), "--profile-overwrite",
+        )
+        require(profile_replaced.returncode == 0 and
+                b"saved query profile" in profile_replaced.stderr,
+                "explicit profile overwrite should replace the existing profile")
+        invalid_profile_path = root / "invalid.glogprofile"
+        invalid_profile_path.write_text(
+            "GLOGVIEW_PROFILE 1\nunknown_setting=value\n", encoding="utf-8")
+        invalid_profile = run(binary, str(json_file), "--profile",
+                              str(invalid_profile_path))
+        require(invalid_profile.returncode == 3 and
+                b"invalid or unsupported setting" in invalid_profile.stderr,
+                "invalid and stale profile settings should fail with a diagnostic")
         compound = run(
             binary,
             str(json_file),
@@ -375,7 +428,7 @@ def main():
         require(cardinality_stats.returncode == 0 and
                 b"Physical records: 1900\n" in cardinality_stats.stdout and
                 b"Selected records: 1900\n" in cardinality_stats.stdout and
-                b"service=api: 900 (estimated; error <= 0)" in cardinality_stats.stdout,
+                b"service=api: 900 (exact)" in cardinality_stats.stdout,
                 "statistics should retain exact counts and bounded heavy hitters at high cardinality")
         timeline_file = root / "timeline.jsonl"
         timeline_file.write_bytes(
@@ -388,8 +441,85 @@ def main():
                 b"Unknown timestamps: 1\n" in timeline.stdout and
                 b"  000: 1\n" in timeline.stdout and
                 b"  255: 1\n" in timeline.stdout and
-                b"service=api: 2 (estimated; error <= 0)\n" in timeline.stdout,
+                b"service=api: 2 (exact)\n" in timeline.stdout,
                 "timeline should normalize UTC offsets, and heavy hitters should count field values")
+        syslog_timeline_file = root / "syslog3164-timeline.log"
+        syslog_timeline_file.write_bytes(
+            b"Jun  4 15:16:01 host app: first\n"
+            b"Jun 14 15:17:01 host app: second\n"
+            b"Jun 14 15:18:01 host app: third\n")
+        ambiguous_syslog_stats = run(binary, str(syslog_timeline_file),
+                                     "--format", "syslog3164", "--stats")
+        require(ambiguous_syslog_stats.returncode == 0 and
+                b"Timestamped records: 0\nUnknown timestamps: 3\n" in
+                ambiguous_syslog_stats.stdout,
+                "RFC 3164 timestamps should remain unknown without an explicit year")
+        configured_syslog_stats = run(
+            binary, str(syslog_timeline_file), "--format", "syslog3164",
+            "--syslog-year", "2025", "--syslog-timezone", "+02:00", "--stats")
+        require(configured_syslog_stats.returncode == 0 and
+                b"Timestamped records: 3\nUnknown timestamps: 0\n" in
+                configured_syslog_stats.stdout and
+                b"  000: 1\n" in configured_syslog_stats.stdout and
+                b"  255: 2\n" in configured_syslog_stats.stdout,
+                "RFC 3164 timestamps should use the configured year and UTC offset")
+        utc_syslog_stats = run(
+            binary, str(syslog_timeline_file), "--format", "syslog3164",
+            "--syslog-year", "2025", "--stats")
+        configured_range = re.search(
+            rb"Timeline range \(UTC epoch seconds\): (\d+)\.\.(\d+)",
+            configured_syslog_stats.stdout)
+        utc_range = re.search(
+            rb"Timeline range \(UTC epoch seconds\): (\d+)\.\.(\d+)",
+            utc_syslog_stats.stdout)
+        require(configured_range is not None and utc_range is not None and
+                int(configured_range.group(1)) == int(utc_range.group(1)) - 7200 and
+                int(configured_range.group(2)) == int(utc_range.group(2)) - 7200,
+                "RFC 3164 timezone offsets should normalize local timestamps to UTC")
+        invalid_leap_day_file = root / "syslog3164-invalid-leap-day.log"
+        invalid_leap_day_file.write_bytes(b"Feb 29 12:00:00 host app: leap day\n")
+        invalid_leap_day_stats = run(
+            binary, str(invalid_leap_day_file), "--format", "syslog3164",
+            "--syslog-year", "2025", "--stats")
+        require(invalid_leap_day_stats.returncode == 0 and
+                b"Timestamped records: 0\nUnknown timestamps: 1\n" in
+                invalid_leap_day_stats.stdout,
+                "RFC 3164 dates should be validated against the configured year's calendar")
+        missing_syslog_format = run(binary, str(syslog_timeline_file),
+                                    "--syslog-year", "2025")
+        require(missing_syslog_format.returncode == 3,
+                "RFC 3164 date settings should require syslog3164 or auto format")
+        short_syslog_year = run(
+            binary, str(syslog_timeline_file), "--format", "syslog3164",
+            "--syslog-year", "25")
+        require(short_syslog_year.returncode == 3,
+                "RFC 3164 year settings should require four digits")
+        invalid_syslog_timezone = run(
+            binary, str(syslog_timeline_file), "--format", "syslog3164",
+            "--syslog-year", "2025", "--syslog-timezone", "+25:00")
+        require(invalid_syslog_timezone.returncode == 3,
+                "invalid syslog timezone offsets should be rejected")
+        service_stats = run(binary, str(timeline_file), "--format", "jsonl",
+                            "--stats-field", "service")
+        require(service_stats.returncode == 0 and
+                b"Frequent values for service:\n" in service_stats.stdout and
+                b"service=api: 2 (exact)\n" in service_stats.stdout and
+                b"level=INFO:" not in service_stats.stdout,
+                "--stats-field should focus frequent-value output on the requested field")
+        filtered_service_stats = run(
+            binary, str(timeline_file), "--format", "jsonl", "--filter",
+            "level=ERROR", "--stats-field", "service")
+        require(filtered_service_stats.returncode == 0 and
+                b"Selected records: 2\n" in filtered_service_stats.stdout and
+                b"service=api: 1 (exact)" in filtered_service_stats.stdout and
+                b"service=web: 1 (exact)" in filtered_service_stats.stdout and
+                b"level=INFO:" not in filtered_service_stats.stdout,
+                "field statistics should apply the active filter before counting values")
+        estimated_stats = run(binary, str(cardinality_file), "--format", "jsonl",
+                              "--stats-field", "service")
+        require(estimated_stats.returncode == 0 and
+                b"(estimated; error <= " in estimated_stats.stdout,
+                "high-cardinality focused statistics should label approximate candidates and bounds")
         access_file = root / "access-stats.log"
         access_line = (
             b'203.0.113.8 - alice [10/Oct/2000:13:55:36 -0700] '
@@ -511,6 +641,14 @@ def main():
                 read_until(b"Scanning input", 2)
                 read_until(b"selected: 604", 3)
                 read_until_count(b"Scan complete", 4, 3)
+                field_summary_start = len(tui_output)
+                os.write(master_fd, b"v")
+                read_until(b"Summarize field: ", 2)
+                os.write(master_fd, b"level\r")
+                read_until(b"Field values | level", 2, field_summary_start)
+                read_until(b"ERROR", 2, field_summary_start)
+                os.write(master_fd, b"\x1b")
+                read_until(b"Search: (none)", 2)
                 os.write(master_fd, b"q")
                 try:
                     tui_process.wait(timeout=5)
@@ -577,6 +715,8 @@ def main():
                     "shift-enter reverse navigation": b"\033[7m       2" in tui_output,
                     "clear resets filters and search": b"selected: 604" in tui_output,
                     "invalid filter diagnostic": b"Invalid filter:" in tui_output,
+                    "field value summary": b"Field values | level" in tui_output and
+                                          b"ERROR  1 (exact)" in tui_output,
                     "terminal mode restoration": terminal_restored,
                 }
                 failed_checks = [name for name, passed in tui_checks.items() if not passed]
@@ -678,14 +818,25 @@ def main():
                 context_read_until(b"Context around source line 3", 2, context_start)
                 context_read_until(b'2 {"level":"ERROR","message":"connection timeout"}',
                                    2, context_start)
-                os.write(context_master, b"q")
-                context_process.wait(timeout=3)
-                require(context_process.returncode == 0 and
-                        b"Context around source line 3" in context_output[context_start:] and
+                require(b"Context around source line 3" in context_output[context_start:] and
                         b'2 {"level":"ERROR","message":"connection timeout"}' in
                         context_output[context_start:],
                         "TUI context view should show physical records around the selected row; "
                         "output={!r}".format(bytes(context_output[context_start:])))
+                bookmark_start = len(context_output)
+                os.write(context_master, b"b\x1b[A B")
+                context_read_until(b"Jumped to bookmark: source line 3", 2,
+                                   bookmark_start)
+                context_size_start = len(context_output)
+                os.write(context_master, b"+")
+                context_read_until(b"Context size: 5 before, 5 after", 2,
+                                   context_size_start)
+                os.write(context_master, b"q")
+                context_process.wait(timeout=3)
+                require(context_process.returncode == 0 and
+                        b"Bookmarked source line 3" in context_output[bookmark_start:] and
+                        b"Context size: 5 before, 5 after" in context_output[bookmark_start:],
+                        "TUI should bookmark source lines and adjust context around the selection")
             finally:
                 if context_process.poll() is None:
                     context_process.kill()
@@ -1080,6 +1231,7 @@ def main():
             b'{\n'
             b'  "employee": {\n'
             b'    "id": "E1",\n'
+            b'    "display": "literal { brace, } brace, and \\"quoted\\" text",\n'
             b'    "department": {"manager": {"contact": {"phone": "829-648-0859x1216"}}}\n'
             b'  },\n'
             b'  "projects": [{"projectId": "P1", "details": {"active": true}}],\n'
@@ -1126,6 +1278,115 @@ def main():
             ["2", "829-648-0859x1216"],
         ], "nested JSON CSV columns should preserve values and source line numbers")
         if os.name != "nt":
+            histogram_file = root / "histogram.jsonl"
+            histogram_file.write_bytes(
+                b'{"timestamp":"2025-01-01T00:00:00Z","level":"ERROR","message":"first"}\n'
+                b'{"timestamp":"2025-01-01T00:02:00Z","level":"INFO","message":"last"}\n'
+                b'{"timestamp":"2025-01-01T00:01:00Z","level":"WARN","message":"middle"}\n'
+                b'{"timestamp":"unsupported","level":"INFO","message":"unknown"}\n'
+            )
+            histogram_master, histogram_slave = pty.openpty()
+            fcntl.ioctl(histogram_slave, termios.TIOCSWINSZ,
+                        struct.pack("HHHH", 20, 100, 0, 0))
+            histogram_tui = subprocess.Popen(
+                [str(binary), str(histogram_file), "--format", "jsonl", "--tui"],
+                stdin=histogram_slave,
+                stdout=histogram_slave,
+                stderr=histogram_slave,
+                close_fds=True,
+            )
+            histogram_output = bytearray()
+            try:
+                def histogram_read_until(needle, timeout, start=0):
+                    deadline = time.monotonic() + timeout
+                    while needle not in histogram_output[start:] and \
+                            histogram_tui.poll() is None and time.monotonic() < deadline:
+                        ready, _, _ = select.select([histogram_master], [], [], 0.1)
+                        if ready:
+                            try:
+                                histogram_output.extend(os.read(histogram_master, 65536))
+                            except OSError:
+                                break
+
+                histogram_read_until(b"Scan complete", 3)
+                os.write(histogram_master, b"h")
+                histogram_read_until(b"Time histogram", 3)
+                histogram_read_until(b"Bucket 000 | 1 records", 3)
+                histogram_screen = bytes(histogram_output[
+                    histogram_output.rfind(b"\x1b[H\x1b[2J"):])
+                require(b"UTC time: oldest" in histogram_screen and
+                        b"Relative volume" in histogram_screen and
+                        b"tallest column =" in histogram_screen and
+                        b"Legend: # normal  + warning  ! error" in histogram_screen and
+                        histogram_screen.count(
+                            b"Left/Right: bucket  Enter: jump  Esc or h: records") == 1,
+                        "TUI histogram should explain its axes and show navigation instructions once")
+                right_output_start = len(histogram_output)
+                os.write(histogram_master, b"\x1b[C")
+                histogram_read_until(b"Bucket 126 | 1 records", 3,
+                                     right_output_start)
+                jump_output_start = len(histogram_output)
+                os.write(histogram_master, b"\r")
+                histogram_read_until(b"Jumped to first record in bucket 126", 3,
+                                     jump_output_start)
+                os.write(histogram_master, b"q")
+                histogram_tui.wait(timeout=5)
+                require(histogram_tui.returncode == 0 and
+                        b"Unknown timestamps: 1" in histogram_output and
+                        b'3 {"timestamp":"2025-01-01T00:01:00Z"' in histogram_output,
+                        "TUI histogram should navigate to the first selected record in a bucket")
+            finally:
+                if histogram_tui.poll() is None:
+                    histogram_tui.kill()
+                    histogram_tui.wait(timeout=5)
+                os.close(histogram_master)
+                os.close(histogram_slave)
+
+            syslog_histogram_master, syslog_histogram_slave = pty.openpty()
+            fcntl.ioctl(syslog_histogram_slave, termios.TIOCSWINSZ,
+                        struct.pack("HHHH", 24, 100, 0, 0))
+            syslog_histogram_tui = subprocess.Popen(
+                [str(binary), str(syslog_timeline_file), "--format", "syslog3164",
+                 "--syslog-year", "2025", "--syslog-timezone", "+02:00", "--tui"],
+                stdin=syslog_histogram_slave,
+                stdout=syslog_histogram_slave,
+                stderr=syslog_histogram_slave,
+                close_fds=True,
+            )
+            syslog_histogram_output = bytearray()
+            try:
+                def syslog_histogram_read_until(needle, timeout, start=0):
+                    deadline = time.monotonic() + timeout
+                    while needle not in syslog_histogram_output[start:] and \
+                            syslog_histogram_tui.poll() is None and time.monotonic() < deadline:
+                        ready, _, _ = select.select([syslog_histogram_master], [], [], 0.1)
+                        if ready:
+                            try:
+                                syslog_histogram_output.extend(
+                                    os.read(syslog_histogram_master, 65536))
+                            except OSError:
+                                break
+
+                syslog_histogram_read_until(b"Scan complete", 3)
+                os.write(syslog_histogram_master, b"h")
+                syslog_histogram_read_until(b"Bucket 000 | 1 records", 3)
+                jump_start = len(syslog_histogram_output)
+                os.write(syslog_histogram_master, b"\r")
+                syslog_histogram_read_until(
+                    b"Jumped to first record in bucket 000", 2, jump_start)
+                os.write(syslog_histogram_master, b"q")
+                syslog_histogram_tui.wait(timeout=4)
+                require(syslog_histogram_tui.returncode == 0 and
+                        b"3 timestamped | 0 unknown" in syslog_histogram_output and
+                        b"Jun  4 15:16:01" in syslog_histogram_output,
+                        "configured RFC 3164 timestamps should populate and navigate the TUI histogram")
+            finally:
+                if syslog_histogram_tui.poll() is None:
+                    syslog_histogram_tui.kill()
+                    syslog_histogram_tui.wait(timeout=5)
+                os.close(syslog_histogram_master)
+                os.close(syslog_histogram_slave)
+
             nested_master, nested_slave = pty.openpty()
             fcntl.ioctl(nested_slave, termios.TIOCSWINSZ,
                         struct.pack("HHHH", 24, 120, 0, 0))
@@ -1184,7 +1445,10 @@ def main():
                 require(nested_tui.returncode == 0 and
                         b"selected: 1" in nested_tui_output and
                         b"829-648-0859x1216" in nested_tui_output and
-                        b'"employee": { "id": "E1"' in nested_tui_output and
+                        b'"employee": {\n' in nested_tui_output and
+                        b'"id": "E1"' in nested_tui_output and
+                        b'"display": "literal { brace, } brace, and \\"quoted\\" text"' in nested_tui_output and
+                        b"formatted JSON" in nested_tui_output and
                         b"Record zoom | source line 2" in nested_tui_output and
                         b"zoom-end-marker" in nested_tui_output,
                         "TUI should display the multiline JSON record matching a nested phone field")

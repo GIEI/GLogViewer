@@ -1,6 +1,6 @@
 # Software Architecture
 
-**Status:** architecture for the stable 1.0 release. Milestones 0.1–0.5 are implemented; Windows, Linux, and macOS CI, Linux sanitizer checks, release packaging, and the Windows 1 GiB benchmark pass. The behavioral contract is in [Technical Specification](TECHNICAL_SPECIFICATION.md), and validation evidence is in [Validation notes](VALIDATION.md).
+**Status:** architecture for stable 1.0 and the implemented 1.1/1.2/1.3 development scope. The 1.3 changes pass the local Windows build and suite. Linux/macOS pseudo-terminal checks, Linux sanitizers, and package gates remain before publication. The behavioral contract is in [Technical Specification](TECHNICAL_SPECIFICATION.md), and validation evidence is in [Validation notes](VALIDATION.md).
 
 ## 1. Architectural goals
 
@@ -27,7 +27,7 @@ flowchart LR
 
 | Module | Responsibilities | Interface boundary |
 | --- | --- | --- |
-| `cli` | Parse arguments, validate combinations, choose mode and exit status | Produces immutable `ExecutionPlan`. |
+| `cli` / query profiles | Parse arguments, validate combinations and versioned query settings, choose mode and exit status | CLI arguments override the loaded profile; no profile file is written without an explicit save path. |
 | `line_reader` | Reusable bounded buffer, LF/CRLF handling, 64-bit offsets, final partial line, seek/reposition for follow | Emits transient `LineView`. |
 | `follow` | Poll file size and identity; wait for complete lines; reopen rotations and reset truncated inputs | Repositions the reader and preserves the last complete line number. |
 | `format_detect` | Bounded sample and confidence scoring | Chooses a preset or raw mode. |
@@ -38,10 +38,10 @@ flowchart LR
 | `regex_compile` | Lex and parse supported regex into AST; reject invalid syntax | Emits immutable NFA program and capture metadata. |
 | `regex_vm` | Iterative NFA matching and match spans | Reads byte slices; enforces state and work limits. |
 | `filter` | Compile expression grammar and evaluate predicates | Reads `LogEntry`, never mutates it. |
-| `stats` | Exact physical/parsed/rejected/selected and per-level counts | Fixed-bin timeline and bounded Space-Saving estimates. |
+| `stats` | Exact physical/parsed/rejected/selected and per-level counts; timestamp normalization | Fixed-bin timeline and bounded Space-Saving estimates; optional year/fixed-offset context interprets RFC 3164 date fields without altering record data. |
 | `export` | Stream raw text or CSV with escaping, UTF-8 replacement, and short-write handling | Consumes selected entries immediately; protects existing files by default. |
 | `follow` | Poll, detect append/truncation/replacement, wait for complete records, and maintain reader state | Repositions the shared reader for the pipeline. |
-| `tui` | Input, bounded viewport, search, severity jumps, context view, live follow, resize handling, dynamic filter edits, help, clipped rendering | Retains 256 rows with 1 KiB previews and stores navigation/context checkpoints in temporary files. |
+| `tui` | Input, bounded viewport, search, severity jumps, source-line bookmarks, configurable context, live follow, resize handling, dynamic filter edits, field summaries, histogram, help, clipped rendering | Retains 256 rows with 1 KiB previews; stores up to 32 session bookmarks in memory and navigation/context checkpoints in temporary files. Shares timestamp interpretation settings with batch statistics. |
 | `platform` | 64-bit seek/stat, sleep, file identity, terminal mode and input | POSIX and Win32 implementations with a common header. |
 
 Proposed layout:
@@ -61,7 +61,7 @@ Makefile
 build.bat
 ```
 
-The current implementation uses `include/logview.h`, `src/main.c`, `src/reader.c`, `src/reader.h`, `src/follow.c`, `src/follow.h`, `src/terminal.c`, `src/terminal.h`, `src/tui.c`, `src/tui.h`, `src/jsonl.c`, `src/jsonl.h`, `src/parsers.c`, `src/parsers.h`, `src/filter.c`, `src/filter.h`, `src/output.c`, `src/output.h`, `src/stats.c`, `src/stats.h`, `src/regex.c`, `src/regex.h`, and `tests/test_cli.py`.
+The current implementation uses `include/logview.h`, `src/main.c`, `src/reader.c`, `src/reader.h`, `src/follow.c`, `src/follow.h`, `src/terminal.c`, `src/terminal.h`, `src/tui.c`, `src/tui.h`, `src/jsonl.c`, `src/jsonl.h`, `src/json_pretty.c`, `src/json_pretty.h`, `src/parsers.c`, `src/parsers.h`, `src/filter.c`, `src/filter.h`, `src/output.c`, `src/output.h`, `src/stats.c`, `src/stats.h`, `src/regex.c`, `src/regex.h`, and `tests/test_cli.py`.
 
 ## 3. Data contracts and lifetime
 
@@ -141,7 +141,9 @@ The core sees `platform_file_open`, `platform_file_seek64`, `platform_file_ident
 | 0.4 implemented | Batch follow controller | Windows and Linux append/partial/truncate/from-start/rotation/Ctrl-C tests pass. |
 | 0.5 complete | TUI with bounded viewport, full-scan navigation, search, filters, context, and follow | Windows build and non-terminal checks pass; expanded Linux PTY scenario passes; user-reported manual checks cover Windows Terminal and macOS. A repeatable terminal matrix remains in release validation. |
 | 0.9–1.0 | Hardening, benchmark, documentation, release packaging | Published evidence for every 1.0 gate. |
+| 1.1 published | Lexical range filters, result windows, complete-record CLI inspection | Tagged release v1.1.0. |
+| 1.2 development complete | JSON pretty presentation, focused frequent-value statistics, navigable TUI histogram | Windows build and full local suite pass; Linux/macOS PTY, Linux sanitizers, and release packaging remain. |
 
-The detailed scope and pass criteria for each release are in [Roadmap to Version 1.0](ROADMAP.md).
+The release history and future milestones are in the [product roadmap](ROADMAP.md); implementation sequence and acceptance criteria for upcoming releases are in the [implementation plan](IMPLEMENTATION_PLAN.md).
 
 The [Loghub corpus](https://github.com/logpai/loghub) can provide additional real-world parser fixtures after reviewing dataset licenses and privacy. The [Drain paper](https://pinjiahe.github.io/files/pdf/research/ICWS17.pdf) concerns automatic log-template discovery; this architecture intentionally uses explicit parsers and custom patterns first.

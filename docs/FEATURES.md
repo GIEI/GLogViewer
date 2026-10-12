@@ -1,6 +1,6 @@
 # Feature Catalogue and Product Positioning
 
-**Status:** this catalogue describes the 1.1 release. It builds on the stable 1.0 release with lexical range filters, record sampling, and bounded result windows. Windows, Linux, and macOS CI, Linux sanitizer checks, and release packaging gate publication. Exact behavior and known limits are specified in [Technical Specification](TECHNICAL_SPECIFICATION.md).
+**Status:** the 1.3.0 development scope is implemented locally on Windows. Linux/macOS pseudo-terminal checks, Linux sanitizer checks, and packaging are required before publication. Version 1.1.0 remains the latest published release. Exact behavior and known limits are specified in [Technical Specification](TECHNICAL_SPECIFICATION.md).
 
 ## 1. Users and jobs
 
@@ -27,7 +27,8 @@ Common application fields worth preserving are timestamp, severity, message, ser
 | Range filters and record sampling | Should | Inspect record structure and select ordered value windows | Bytewise field comparisons (`<`, `<=`, `>`, `>=`), `--record first|last`, and `--top/--bottom N`. |
 | Internal regex on raw line or field | Must | Find text and highlight evidence | Supported subset; iterative NFA execution. |
 | CLI batch mode | Must | Use in scripts and incident runbooks | Stable exit codes and diagnostics. |
-| TUI browse/search/help | Must | Explore filtered records interactively | Bounded viewport cache, full-scan checkpoints, regex search, source-line jumps, severity jumps, context view, and scrollable full-record zoom. |
+| TUI browse/search/help | Must | Explore filtered records interactively | Bounded viewport cache, full-scan checkpoints, regex search, source-line jumps and bookmarks, severity jumps, configurable context, formatted JSON zoom, field-value summary, and navigable time histogram. |
+| Query profiles | Must | Repeat investigations without rebuilding command options | Versioned portable settings shared by batch CLI and TUI, with explicit overwrite and validation. |
 | Follow mode | Must | Watch a live application file | Append/truncate/rotation behavior documented. |
 | Text and CSV export | Must | Share a filtered evidence set | Streamed output with fixed CSV columns. |
 | Counts, timeline, frequent values | Must | Spot error spikes and dominant fields | Exact counters; bounded estimated heavy hitters. |
@@ -47,12 +48,12 @@ Common application fields worth preserving are timestamp, severity, message, ser
 
 | Product or approach | Documented strength | When it may be preferable | GLogViewer design opportunity |
 | --- | --- | --- | --- |
-| [lnav](https://docs.lnav.org/en/latest/) | Terminal log navigation, built-in/custom formats, SQL and advanced views. [Format documentation](https://docs.lnav.org/en/latest/formats.html) | Rich established interactive analysis. | Small C99, no external runtime libraries, sharply defined regex/filter subset. |
+| [lnav](https://docs.lnav.org/en/latest/) | Terminal log navigation, built-in/custom formats, SQL virtual tables, JSON pretty-printing, histograms, and advanced views. [UI documentation](https://docs.lnav.org/en/latest/ui.html), [SQLite interface](https://docs.lnav.org/en/latest/sqlext.html) | Rich established interactive analysis, especially SQL-based exploration. | Small C99, no external runtime libraries, focused regex/filter subset, fixed-memory summaries. |
 | [GoAccess](https://goaccess.io/) | Real-time HTTP access analytics in terminal and browser; CSV/JSON/HTML reports. | Web traffic dashboards and detailed HTTP metrics. | Mixed application/syslog/custom logs rather than HTTP specialization. |
-| [klogg](https://github.com/voyager42/klogg) | Cross-platform GUI search of large text logs. | Graphical desktop exploration. | Scriptable CLI plus terminal workflow and structured field filters. |
+| [klogg](https://github.com/voyager42/klogg) | Cross-platform GUI search of huge logs with multithreaded indexing, regex, watch mode, and separate search results/context. [Project documentation](https://github.com/voyager42/klogg) | Graphical desktop exploration and rapid indexed search. | Scriptable CLI plus terminal workflow, structured field filters, and bounded summaries without a persistent index. |
 | [GNU grep](https://www.gnu.org/software/grep/manual/grep.html) with text tools | Mature line-oriented pattern search and pipelines. | One-off searches and existing shell pipelines. | Built-in field extraction, combined predicates, TUI, and summaries. |
 
-This comparison describes published capabilities, not performance superiority. No claim is made that GLogViewer currently matches those products: it has no implementation yet.
+These products suggest useful interaction patterns: lnav connects aggregate views and structured inspection, while klogg keeps search responsive on very large files with indexing and separates result navigation from source context. GLogViewer 1.2 adopts aggregate-to-record navigation with a bounded two-pass histogram and focused field summaries. It does not claim feature parity or performance superiority; the implementation remains a single-file local analyzer with a deliberately smaller feature set.
 
 ## 5. Usability criteria
 
