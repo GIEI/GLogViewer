@@ -1,7 +1,7 @@
 # Technical Specification
 
 **Project:** GLogViewer (`logview`)  
-**Status:** 1.5.0 development adds CRI parsing to the implemented 1.4 multi-file workflow. Windows C99 build and full CLI/sample suite are the local verification gates; POSIX, sanitizer, and package checks remain before publication. See [validation notes](VALIDATION.md).
+**Status:** Version 1.5.0 is stable and adds CRI parsing to the 1.4 multi-file workflow. The project owner verified the test suite on Windows, Linux, and macOS. See [validation notes](VALIDATION.md).
 **Language:** C99; all repository content is English.
 
 ## 1. Purpose and scope

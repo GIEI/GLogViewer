@@ -1,6 +1,6 @@
 # GLogViewer Product Roadmap
 
-**Status:** Version 1.0.0 is stable and 1.1.0 is the latest published release. Version 1.5.0 CRI parsing is implemented on top of 1.4.0 multi-file batch analysis and passes the Windows CLI suite locally; Linux/macOS, sanitizer, and package release gates remain. This roadmap preserves release history and defines the next direction. See the [implementation plan](IMPLEMENTATION_PLAN.md) and [validation notes](VALIDATION.md).
+**Status:** Version 1.5.0 is the current stable release. The project owner verified the complete test suite on Windows, Linux, and macOS; the tag-triggered workflow runs sanitizer, package, and provenance checks before publication. This roadmap preserves release history and defines the next direction. See the [implementation plan](IMPLEMENTATION_PLAN.md) and [validation notes](VALIDATION.md).
 
 ## Product decision
 
@@ -24,17 +24,17 @@ The numbers identify capability milestones, not calendar dates. A stage is compl
 
 ## Recent milestones and post-1.3 roadmap
 
-The 1.2 scope was implemented locally and the 1.3 scope is now implemented and tested on Windows. The next milestones prioritize cross-file analysis. Each release is complete only when its exit gate passes on Windows, Linux, and macOS.
+Versions 1.2 through 1.5 are complete. The next milestones prioritize additional format support. Each release is complete only when its exit gate passes on Windows, Linux, and macOS.
 
 | Release | User-visible outcome | Main additions | Exit gate |
 | --- | --- | --- | --- |
-| **1.2 Structured inspection** | Read and summarize structured records without losing the original evidence. | Pretty-printed JSON; focused field-value statistics; navigable TUI histogram; explicit year and timezone for RFC 3164 timestamp analysis. | Implemented and locally tested on Windows; Linux/macOS PTY runs, Linux sanitizers, and release package checks remain before publication. |
-| **1.3 Investigation workflow** | Return to useful evidence and repeat a prior investigation. | TUI source-line bookmarks; versioned query profiles; configurable context before and after a match. | Windows build and CLI suite pass locally; POSIX PTY coverage, Linux sanitizers, and release package checks remain before publication. |
+| **1.2 Structured inspection** | Read and summarize structured records without losing the original evidence. | Pretty-printed JSON; focused field-value statistics; navigable TUI histogram; explicit year and timezone for RFC 3164 timestamp analysis. | Included in 1.5.0; owner reports Windows, Linux, and macOS test suites pass. |
+| **1.3 Investigation workflow** | Return to useful evidence and repeat a prior investigation. | TUI source-line bookmarks; versioned query profiles; configurable context before and after a match. | Included in 1.5.0; owner reports Windows, Linux, and macOS test suites pass. |
 | **1.4 Multi-file analysis** | Correlate events across related files in chronological order. | Multiple input files, source-file labels, timestamp ordering, explicit handling of records without usable timestamps, aggregated statistics. | Ordering, tie, and missing-timestamp policies are documented and tested; multi-file follow is explicitly deferred; bounded-memory behavior is documented; platform CI passes. |
-| **1.5 Container log support** | Filter Kubernetes container logs without a custom pattern. | CRI parser, auto-detection, stream/tag/message fields, RFC 3339 Nano statistics. | Golden and malformed CRI fixtures pass; source lines remain unchanged; Windows, Linux, and macOS CI passes. |
+| **1.5 Container log support** | Filter Kubernetes container logs without a custom pattern. | CRI parser, auto-detection, stream/tag/message fields, RFC 3339 Nano statistics. | Released as 1.5.0; owner reports the full test suite passes on Windows, Linux, and macOS. |
 | **1.x Format expansion** | Inspect more operational data with the same local workflow. | Compressed input and additional container formats, selected by demand and dependency review. | Format fixtures, malformed-input behavior, portability, license/dependency review, and large-file performance are documented before inclusion. |
 
-Version 1.3 adds repeatable query profiles, source-line bookmarks, and adjustable context. Windows build and CLI verification are complete locally; Linux/macOS PTY runs, Linux sanitizers, and package checks remain required for the release gate. See the [implementation plan](IMPLEMENTATION_PLAN.md) and [release changelog](../CHANGELOG.md).
+Version 1.5.0 is the current stable release and includes repeatable query profiles, source-line bookmarks, adjustable context, multi-file analysis, and Kubernetes CRI support. See the [implementation plan](IMPLEMENTATION_PLAN.md) and [release changelog](../CHANGELOG.md).
 
 Version 1.2 extends the 1.1 statistics and full-record inspection with focused field summaries, a navigable TUI histogram, and readable JSON presentation. It does not change source records or export content. See [implementation plan](IMPLEMENTATION_PLAN.md) for implementation and acceptance details.
 

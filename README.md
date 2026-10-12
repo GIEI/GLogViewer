@@ -1,6 +1,6 @@
 # GLogViewer
 
-GLogViewer is a cross-platform, dependency-free C99 tool for exploring large structured log files from a command line or terminal interface. The executable is `logview`. The batch CLI supports raw and JSON Lines input, syslog RFC 3164/5424, Kubernetes CRI container logs, Apache/Nginx access logs, custom patterns, format detection, compound and range filters, regex, reusable query profiles, record sampling, text/CSV export, exact record/level counts, timestamp timelines, estimated frequent field values, and follow mode with truncation and rotation detection. The TUI supports bounded result windows, viewport navigation, regex search, source-line jumps and bookmarks, error/warning jumps, configurable physical context, formatted JSON zoom, field-value summaries, time histograms, filter edits, export, and live follow. Development version 1.5.0 adds native CRI parsing and auto-detection. The latest stable release is [1.1.0](https://github.com/GIEI/GLogViewer/releases/tag/v1.1.0). See the [release notes](CHANGELOG.md), [user manual](docs/USER_MANUAL.md), and [known limits](docs/TECHNICAL_SPECIFICATION.md).
+GLogViewer is a cross-platform, dependency-free C99 tool for exploring large structured log files from a command line or terminal interface. The executable is `logview`. The batch CLI supports raw and JSON Lines input, syslog RFC 3164/5424, Kubernetes CRI container logs, Apache/Nginx access logs, custom patterns, format detection, compound and range filters, regex, reusable query profiles, record sampling, text/CSV export, exact record/level counts, timestamp timelines, estimated frequent field values, and follow mode with truncation and rotation detection. The TUI supports bounded result windows, viewport navigation, regex search, source-line jumps and bookmarks, error/warning jumps, configurable physical context, formatted JSON zoom, field-value summaries, time histograms, filter edits, export, and live follow. Version 1.5.0 adds native CRI parsing and auto-detection. The latest stable release is [1.5.0](https://github.com/GIEI/GLogViewer/releases/tag/v1.5.0). See the [release notes](CHANGELOG.md), [user manual](docs/USER_MANUAL.md), and [known limits](docs/TECHNICAL_SPECIFICATION.md).
 
 ## Features
 
@@ -95,6 +95,6 @@ All repository content and every source comment must be written in English. See 
 
 ## Status and license
 
-Status: development version `1.5.0`; latest stable release `1.1.0`. The Windows build and CLI suite pass locally; Linux/macOS and sanitizer checks must pass before publication. The existing [LICENSE](LICENSE) governs the repository.
+Status: stable version `1.5.0`. The project owner verified Windows, Linux, and macOS test suites. The tagged release workflow runs platform, sanitizer, packaging, and provenance checks before publishing. The existing [LICENSE](LICENSE) governs the repository.
 
 See the [release process](docs/RELEASE_PROCESS.md) for the tag-based packaging workflow.

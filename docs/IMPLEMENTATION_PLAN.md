@@ -1,6 +1,6 @@
 # GLogViewer Implementation Plan
 
-**Status:** The 1.5.0 development scope, including Kubernetes CRI parsing and raw-line regex exclusion, is implemented locally on Windows. The full Windows CLI suite passes across all 16 available sample files; Windows packaging checks pass. Linux/macOS pseudo-terminal runs, Linux sanitizer checks, and cross-platform package validation remain publication gates. All project content and code comments follow the English-only policy in [AGENTS.md](../AGENTS.md).
+**Status:** Version 1.5.0 is complete. The project owner verified the full test suite on Windows, Linux, and macOS. The tag-triggered release workflow runs Linux sanitizers and cross-platform package checks before publishing. All project content and code comments follow the English-only policy in [AGENTS.md](../AGENTS.md).
 
 ## Product goals
 
@@ -34,9 +34,9 @@ Version 1.1 provides bounded streaming, JSON and text formats, named parsers, fi
 
 ### Validation record
 
-- Windows: `build.bat` and `python tests/test_cli.py build/logview.exe` pass, including all eight locally available regular files under `SAMPLES`.
-- Linux/macOS: the test suite contains PTY checks for field summaries, histograms, JSON zoom, navigation, and terminal restoration, but these checks have not been run on this Windows host.
-- Publication remains gated on platform CI, Linux sanitizer, and release package checks. Local sample timings are not release benchmark evidence.
+- Windows, Linux, and macOS: the project owner reports the complete test suite passing, including platform-specific PTY checks.
+- The tag-triggered release workflow runs clean platform builds, Linux sanitizer checks, and release package validation before publication.
+- Local sample timings are not formal release benchmark evidence.
 
 ## Release 1.3: repeatable investigations
 
@@ -60,7 +60,7 @@ Version 1.1 provides bounded streaming, JSON and text formats, named parsers, fi
 - Added `--context-before` and `--context-after` (0–100, default 4) and interactive `+`/`-` adjustments.
 - Added the versioned `GLOGVIEW_PROFILE 1` text format and `--profile`, `--save-profile`, and explicit `--profile-overwrite` options. Profiles preserve parser and query settings, can be shared between batch and TUI runs, and reject unsupported or malformed values. Explicit CLI settings take precedence.
 - Added deterministic CLI tests for profile save/load, override precedence, invalid profiles, and overwrite protection, plus POSIX PTY checks for bookmark navigation and context-size controls.
-- Windows build and the complete CLI suite pass. POSIX PTY, sanitizer, and release package gates remain unverified on this host.
+- The project owner reports the full test suite passing on Windows, Linux, and macOS, including POSIX PTY coverage. Tag-triggered CI provides the sanitizer and package release gates.
 
 ## Release 1.4: multi-file analysis
 
@@ -84,7 +84,7 @@ Version 1.1 provides bounded streaming, JSON and text formats, named parsers, fi
 - Merge supported timestamped records with one selected head record per source. Each source must be nondecreasing by parseable timestamp; a decrease stops the run with a source path and line diagnostic. Equal timestamps follow command-line argument order, then source-line order.
 - Emit records without a usable timestamp after all timestamped records, preserving argument order and source-line order. Temporary files keep those records off the heap. Output labels identify source path and source line; CSV always includes a `source_file` column.
 - Aggregate `--stats` across all input files. Timestamp values are staged in temporary storage and bucketed after the complete selected timestamp range is known.
-- Add coverage for timestamp interleaving, deterministic ties, missing timestamps, multi-file CSV labels, statistics, duplicate paths, and descending timestamps. Windows C99 build and full CLI/sample suite pass locally; POSIX, sanitizer, and package gates remain.
+- Add coverage for timestamp interleaving, deterministic ties, missing timestamps, multi-file CSV labels, statistics, duplicate paths, and descending timestamps. The project owner reports the full test suite passing on Windows, Linux, and macOS; tag-triggered CI provides sanitizer and package release gates.
 
 ## Release 1.5: Kubernetes CRI logs
 
@@ -108,7 +108,7 @@ Version 1.1 provides bounded streaming, JSON and text formats, named parsers, fi
 
 - Implement the `cri` preset and include it in `auto` format scoring.
 - Add fixtures for fractional timestamps, `stdout`/`stderr`, `P`/`F`, field filtering, timeline stats, invalid dates, and invalid stream names.
-- Windows build, full CLI/sample suite, and package checks pass locally; POSIX, sanitizer, and cross-platform package gates remain before publication.
+- Windows, Linux, and macOS test suites pass according to the project owner. Tagged CI performs the release sanitizer and package checks before publication.
 
 ## Later candidates
 

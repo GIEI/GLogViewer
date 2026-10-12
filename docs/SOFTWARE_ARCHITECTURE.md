@@ -1,6 +1,6 @@
 # Software Architecture
 
-**Status:** architecture for stable 1.0 and the implemented 1.1–1.5 development scope. The Windows C99 build and CLI/sample suite pass for 1.5; Linux/macOS pseudo-terminal checks, Linux sanitizers, and package gates remain before publication. The behavioral contract is in [Technical Specification](TECHNICAL_SPECIFICATION.md), and validation evidence is in [Validation notes](VALIDATION.md).
+**Status:** architecture for stable versions 1.0 through 1.5.0. The project owner verified the test suite on Windows, Linux, and macOS. The behavioral contract is in [Technical Specification](TECHNICAL_SPECIFICATION.md), and validation evidence is in [Validation notes](VALIDATION.md).
 
 ## 1. Architectural goals
 

@@ -1,6 +1,6 @@
 # Feature Catalogue and Product Positioning
 
-**Status:** the 1.5.0 development scope adds Kubernetes CRI log parsing to the 1.4.0 multi-file batch features. Windows build and full CLI/sample suite pass locally; Linux/macOS pseudo-terminal checks, sanitizer checks, and packaging remain before publication. Version 1.1.0 remains the latest published release. Exact behavior and known limits are specified in [Technical Specification](TECHNICAL_SPECIFICATION.md).
+**Status:** Version 1.5.0 is the current stable release. It adds Kubernetes CRI log parsing to the 1.4.0 multi-file batch features. The project owner verified the test suite on Windows, Linux, and macOS. Exact behavior and known limits are specified in [Technical Specification](TECHNICAL_SPECIFICATION.md).
 
 ## 1. Users and jobs
 

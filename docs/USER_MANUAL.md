@@ -1,6 +1,6 @@
 # User Manual
 
-**Status:** GLogViewer 1.5.0 development adds native Kubernetes CRI parsing to the 1.4.0 multi-file workflow. The Windows build and full CLI/sample suite pass locally; tagged Windows, Linux, and macOS builds, tests, sanitizers, packaging, and provenance checks are required before publication. See the [release process](RELEASE_PROCESS.md).
+**Status:** GLogViewer 1.5.0 is the stable release, adding native Kubernetes CRI parsing to the 1.4.0 multi-file workflow. The project owner verified the test suite on Windows, Linux, and macOS. See the [release process](RELEASE_PROCESS.md).
 
 ## 1. What the tool will do
 

@@ -1,6 +1,6 @@
 # GLogViewer Changelog
 
-## 1.5.0 (development)
+## 1.5.0 — 2026-10-12
 
 Adds native parsing for Kubernetes CRI container log files.
 
@@ -14,7 +14,8 @@ Adds native parsing for Kubernetes CRI container log files.
 
 ### Validation status
 
-- Windows C99 build and complete CLI/sample suite pass locally; Linux/macOS, sanitizer, and package gates remain before publication.
+- The project owner verified the complete test suite on Windows, Linux, and macOS.
+- The tag-triggered release workflow runs the platform build/test matrix, Linux sanitizers, archive checks, and provenance generation before publishing the GitHub release.
 
 ## 1.4.0 (development)
 

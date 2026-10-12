@@ -1,6 +1,10 @@
 # Validation Notes
 
-**Status:** local validation evidence, 2026-10-12. Exploratory sample comparisons are observations, not release benchmarks unless explicitly identified below as the formal 1 GiB benchmark.
+**Status:** release validation evidence, 2026-10-12. The project owner reports the full test suite passing on Windows, Linux, and macOS. Tag-triggered CI remains responsible for clean release builds, package checks, Linux sanitizers, and artifact attestations. Exploratory sample comparisons are observations, not release benchmarks unless explicitly identified below as the formal 1 GiB benchmark.
+
+## Version 1.5.0 release validation
+
+The project owner confirmed that the complete test suite passes on Windows, Linux, and macOS. The local Windows build and CLI/sample suite also pass in this workspace. The `v1.5.0` release workflow repeats the platform build and test matrix, runs Linux AddressSanitizer and UndefinedBehaviorSanitizer checks, validates all release archives, generates SHA-256 checksums and artifact attestations, and publishes only after the required jobs succeed.
 
 ## Reader optimization comparison
 
