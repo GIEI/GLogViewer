@@ -1,6 +1,6 @@
 # Feature Catalogue and Product Positioning
 
-**Status:** the 1.3.0 development scope is implemented locally on Windows. Linux/macOS pseudo-terminal checks, Linux sanitizer checks, and packaging are required before publication. Version 1.1.0 remains the latest published release. Exact behavior and known limits are specified in [Technical Specification](TECHNICAL_SPECIFICATION.md).
+**Status:** the 1.5.0 development scope adds Kubernetes CRI log parsing to the 1.4.0 multi-file batch features. Windows build and full CLI/sample suite pass locally; Linux/macOS pseudo-terminal checks, sanitizer checks, and packaging remain before publication. Version 1.1.0 remains the latest published release. Exact behavior and known limits are specified in [Technical Specification](TECHNICAL_SPECIFICATION.md).
 
 ## 1. Users and jobs
 
@@ -26,15 +26,17 @@ Common application fields worth preserving are timestamp, severity, message, ser
 | Field filters with AND/OR | Must | Reduce noise using structured data | Explicit precedence and missing-field rules. |
 | Range filters and record sampling | Should | Inspect record structure and select ordered value windows | Bytewise field comparisons (`<`, `<=`, `>`, `>=`), `--record first|last`, and `--top/--bottom N`. |
 | Internal regex on raw line or field | Must | Find text and highlight evidence | Supported subset; iterative NFA execution. |
+| Raw-line regex exclusion | Implemented | Remove known noise while retaining other matches | `--exclude-regex` works with batch, TUI, follow, exports, statistics, and query profiles. |
 | CLI batch mode | Must | Use in scripts and incident runbooks | Stable exit codes and diagnostics. |
 | TUI browse/search/help | Must | Explore filtered records interactively | Bounded viewport cache, full-scan checkpoints, regex search, source-line jumps and bookmarks, severity jumps, configurable context, formatted JSON zoom, field-value summary, and navigable time histogram. |
 | Query profiles | Must | Repeat investigations without rebuilding command options | Versioned portable settings shared by batch CLI and TUI, with explicit overwrite and validation. |
 | Follow mode | Must | Watch a live application file | Append/truncate/rotation behavior documented. |
 | Text and CSV export | Must | Share a filtered evidence set | Streamed output with fixed CSV columns. |
 | Counts, timeline, frequent values | Must | Spot error spikes and dominant fields | Exact counters; bounded estimated heavy hitters. |
-| Multi-file merge | Later | Correlate several services | Requires cross-file ordering and timestamp policy. |
+| Multi-file merge | Implemented in 1.4 | Correlate several services | Batch only; each source must be timestamp-monotonic. Unknown timestamps are grouped at the end. TUI, follow, and result-window modes remain single-file. |
 | Native journal/Event Log readers | Later | Inspect platform stores directly | Conflicts with a simple portable file-only v1. |
-| CRI-specific parser, multiline events, compressed input | Later | Handle additional operational formats | Needs explicit rules for partial records and dependencies. |
+| Kubernetes CRI parser | Implemented in 1.5 | Filter container stdout/stderr and inspect timestamps and fragment tags | One physical CRI row remains one record; `P`/`F` are exposed as tags. |
+| Multiline event reconstruction, compressed input | Later | Reassemble fragments and inspect rotated/compressed archives | Needs explicit rules for partial records, rotation, and dependencies. |
 | Automatic template discovery | Research | Reduce custom-pattern setup | Related to [Drain](https://pinjiahe.github.io/files/pdf/research/ICWS17.pdf); not required for v1. |
 
 ## 3. Format priorities
@@ -42,7 +44,7 @@ Common application fields worth preserving are timestamp, severity, message, ser
 1. **Application text and JSON:** frequent in services and frameworks; the product's main differentiation is combining raw regex with named fields. Log4j explicitly supports human-readable Pattern Layout and structured JSON output. [Log4j layouts](https://logging.apache.org/log4j/2.x/manual/layouts.html)
 2. **HTTP access logs:** Apache documents Common/Combined, and NGINX documents configurable access formats. Status, client IP, request, and referrer support operational and security questions. [Apache logs](https://httpd.apache.org/docs/2.4/logs.html), [NGINX HTTP log module](https://nginx.org/en/docs/http/ngx_http_log_module.html)
 3. **Syslog:** RFC 3164 and RFC 5424 differ enough to require distinct parsers, especially around timestamp, header, and structured data. [RFC 3164](https://www.rfc-editor.org/info/rfc3164/), [RFC 5424](https://www.rfc-editor.org/info/rfc5424/)
-4. **Container exports:** Kubernetes commonly captures application stdout/stderr in CRI log form, while Docker's JSON-file driver wraps stdout/stderr and timestamp in JSON. A dedicated CRI preset is later work; exported Docker JSON can map through the simple JSON parser. [Kubernetes logging](https://kubernetes.io/docs/concepts/cluster-administration/logging/), [Docker logging](https://docs.docker.com/engine/logging/drivers/json-file/)
+4. **Container exports:** Kubernetes commonly captures application stdout/stderr in CRI log form, while Docker's JSON-file driver wraps stdout/stderr and timestamp in JSON. CRI files use a timestamp, stream, tag, and message layout; Docker JSON can map through the simple JSON parser. [Kubernetes logging proposal](https://github.com/kubernetes/design-proposals-archive/blob/main/node/kubelet-cri-logging.md), [Docker logging](https://docs.docker.com/engine/logging/drivers/json-file/)
 
 ## 4. Existing alternatives and fit
 

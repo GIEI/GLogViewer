@@ -453,11 +453,17 @@ int stats_timeline_add(LogStats *stats, const LogEntry *entry)
 {
     ByteSpan timestamp;
     int64_t epoch;
-    size_t bin;
     if (!log_entry_find_field(entry, "timestamp", &timestamp) ||
         !stats_timestamp_epoch_configured(timestamp, &stats->timestamp_config,
                                           &epoch)) return 1;
-    if (!stats->has_timestamp || epoch < stats->earliest_timestamp || epoch > stats->latest_timestamp) return 0;
+    return stats_timeline_add_epoch(stats, epoch);
+}
+
+int stats_timeline_add_epoch(LogStats *stats, int64_t epoch)
+{
+    size_t bin;
+    if (stats == NULL || !stats->has_timestamp ||
+        epoch < stats->earliest_timestamp || epoch > stats->latest_timestamp) return 0;
     bin = stats_timeline_bin(epoch, stats->earliest_timestamp,
                              stats->latest_timestamp);
     if (!increment(&stats->timeline[bin]) || !increment(&stats->timestamped)) return 0;

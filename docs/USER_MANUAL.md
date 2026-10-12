@@ -1,10 +1,10 @@
 # User Manual
 
-**Status:** GLogViewer 1.3.0 development adds query profiles, source-line bookmarks, and adjustable TUI context to the 1.2.0 development features. Windows build and tests pass locally; tagged Windows, Linux, and macOS builds, tests, sanitizers, packaging, and provenance checks are required before publication. See the [release process](RELEASE_PROCESS.md).
+**Status:** GLogViewer 1.5.0 development adds native Kubernetes CRI parsing to the 1.4.0 multi-file workflow. The Windows build and full CLI/sample suite pass locally; tagged Windows, Linux, and macOS builds, tests, sanitizers, packaging, and provenance checks are required before publication. See the [release process](RELEASE_PROCESS.md).
 
 ## 1. What the tool will do
 
-`logview` reads a local line-oriented log file and prints selected records. The current CLI supports raw, JSON Lines, syslog RFC 3164/5424, Apache/Nginx access logs, custom patterns, format detection, text/CSV export, statistics, follow mode, and an initial terminal browser. The input is read-only. Binary systemd journals and native Windows Event Log files must first be exported to a supported line-oriented form.
+`logview` reads local line-oriented log files and prints selected records. The current CLI supports raw, JSON Lines, syslog RFC 3164/5424, Kubernetes CRI, Apache/Nginx access logs, custom patterns, format detection, text/CSV export, statistics, follow mode, and an interactive terminal browser. Batch mode can merge up to 16 files by timestamp. The input is read-only. Binary systemd journals and native Windows Event Log files must first be exported to a supported line-oriented form.
 
 ## Build and options
 
@@ -21,11 +21,12 @@ python tests\test_cli.py build\logview.exe
 make clean && make test
 ```
 
-The current CLI supports one file and these options:
+The CLI accepts one or more file paths and these options:
 
 ```text
-logview <file> [--format FORMAT] [--pattern PATTERN] [--filter EXPRESSION]
+logview <file> [<file> ...] [--format FORMAT] [--pattern PATTERN] [--filter EXPRESSION]
                 [--regex pattern] [--regex-field field=pattern]
+                [--exclude-regex pattern]
                 [--stats [--stats-field FIELD] | --export text|csv --output path]
                 [--columns list] [--force]
                 [--follow [--from-start] [--flush-partial]]
@@ -34,7 +35,7 @@ logview <file> [--format FORMAT] [--pattern PATTERN] [--filter EXPRESSION]
                 [--max-line-bytes count]
 ```
 
-`--format raw` is the default. Formats include `raw`, `jsonl`, `syslog3164`, `syslog5424`, `apache-common`, `apache-combined`, `nginx-combined`, `custom`, and `auto`. `--filter` accepts equality, inequality, regex, and lexical range comparisons combined with `and`, `or`, and parentheses. `--regex` searches the entire raw line; `--regex-field` searches a parsed field. These options are combined with `--filter` using AND. `--stats` prints exact record and level counts, a 256-bin timestamp timeline, and frequent field/value pairs, marking each count exact or estimated. Add `--stats-field FIELD` to show frequent values only for a particular parsed field; it also enables stats mode by itself. Timestamp aggregation recognizes ISO/RFC 3339 values with `Z` or a numeric offset and Apache Combined timestamps. RFC 3164 timestamps need `--syslog-year YYYY`; their timezone defaults to UTC and can be set with `--syslog-timezone +/-HH:MM`. Dates without enough information to interpret them remain unknown. The timeline makes a second streaming pass over the input. `--follow` waits for appended complete lines, detects file truncation and rotation, and handles Ctrl-C. `--export` streams selected records to a text or CSV file. Use `--help` or `--version` to inspect the built program.
+`--format raw` is the default. Formats include `raw`, `jsonl`, `syslog3164`, `syslog5424`, `apache-common`, `apache-combined`, `nginx-combined`, `custom`, and `auto`. `--filter` accepts equality, inequality, regex, and lexical range comparisons combined with `and`, `or`, and parentheses. `--regex` searches the entire raw line; `--regex-field` searches a parsed field; `--exclude-regex` removes records whose raw line matches its pattern. Positive and exclusion regexes combine with each other and with `--filter` using AND. Matching is case-sensitive. `--stats` prints exact record and level counts, a 256-bin timestamp timeline, and frequent field/value pairs, marking each count exact or estimated. Add `--stats-field FIELD` to show frequent values only for a particular parsed field; it also enables stats mode by itself. Timestamp aggregation recognizes ISO/RFC 3339 values with `Z` or a numeric offset and Apache Combined timestamps. RFC 3164 timestamps need `--syslog-year YYYY`; their timezone defaults to UTC and can be set with `--syslog-timezone +/-HH:MM`. Dates without enough information to interpret them remain unknown. The timeline makes a second streaming pass over the input. `--follow` waits for appended complete lines, detects file truncation and rotation, and handles Ctrl-C. `--export` streams selected records to a text or CSV file. Use `--help` or `--version` to inspect the built program.
 
 The command form below documents the current CLI options. See the [release process](RELEASE_PROCESS.md) for platform archive details and verification.
 
@@ -44,6 +45,7 @@ The command form below documents the current CLI options. See the [release proce
 logview <file> [--format <name>] [--pattern <pattern>]
                [--filter <expression>] [--regex <pattern>]
                [--regex-field <field>=<pattern>]
+               [--exclude-regex <pattern>]
                [--stats | --export text|csv | --tui]
                [--output <path>] [--columns <fields>]
                [--follow] [--from-start] [--flush-partial]
@@ -51,7 +53,9 @@ logview <file> [--format <name>] [--pattern <pattern>]
                [--max-line-bytes <n>] [--force]
 ```
 
-The default is batch text output and `raw` input. Format names are `raw`, `syslog3164`, `syslog5424`, `apache-common`, `apache-combined`, `nginx-combined`, `jsonl`, `custom`, and `auto`. Auto detection samples up to 32 complete lines or 256 KiB and falls back to raw if no format is confidently detected. `--pattern` requires `--format custom`. `--stats`, `--export`, and `--tui` choose distinct primary output modes. `--follow` cannot be combined with `--stats` or `--export`. `--tui` needs an interactive terminal.
+Multi-file batch runs use one format for every source, unless `--format auto` is selected. They merge by timestamp and label each record with its source path and source line. TUI and follow remain single-file modes.
+
+The default is batch text output and `raw` input. Format names are `raw`, `syslog3164`, `syslog5424`, `cri`, `apache-common`, `apache-combined`, `nginx-combined`, `jsonl`, `custom`, and `auto`. Auto detection samples up to 32 complete lines or 256 KiB and falls back to raw if no format is confidently detected. `--pattern` requires `--format custom`. `--stats`, `--export`, and `--tui` choose distinct primary output modes. `--follow` cannot be combined with `--stats` or `--export`. `--tui` needs an interactive terminal.
 
 ### Basic examples
 
@@ -59,6 +63,8 @@ The default is batch text output and `raw` input. Format names are `raw`, `syslo
 logview app.log --format custom --pattern "%{TIMESTAMP} %{LEVEL} %{MESSAGE}"
 logview app.log --format jsonl --filter "level=ERROR"
 logview app.log --format jsonl --filter "level=ERROR" --regex "timeout"
+logview app.log --exclude-regex "error"
+logview app.log --regex "timeout" --exclude-regex "connection refused"
 logview access.log --format apache-combined --filter "status=500 or status=502"
 logview syslog.log --format syslog5424 --stats
 logview syslog.log --format syslog3164 --syslog-year 2025 --syslog-timezone +02:00 --stats
@@ -71,7 +77,15 @@ logview app.log --format jsonl --top 10
 logview app.log --format jsonl --bottom 10 --tui
 logview app.log --format jsonl --record first
 logview app.log --format jsonl --record last
+logview api-a.jsonl api-b.jsonl --format jsonl --filter "level=ERROR" --export csv --output merged.csv
+logview service-a.log service-b.log --format auto --stats
 ```
+
+### Merge multiple files
+
+Batch mode accepts up to 16 file paths. Input argument order breaks ties between equal timestamps, while records from one source retain their source-line order. Each file must be nondecreasing by every parseable timestamp; the command stops with exit code 2 if a source timestamp moves backward. Records with no supported timestamp follow all timestamped records, grouped by input file and then source-line order. Text output prefixes each record with `[path:line]`. CSV output always includes a `source_file` column, appending it when `--columns` omits it.
+
+`--format auto` can detect the format independently for each source; any explicit format applies to all inputs. Multi-file runs do not accept directories, duplicate file identities, stdin (`-`), TUI, follow, `--top`, `--bottom`, or `--record`. Rows without timestamps are staged in temporary files, so they may require disk space proportional to their combined size even though heap use stays bounded.
 
 RFC 3164 timestamps contain a month, day, and time, but no year or timezone. To include them in batch timelines and the TUI histogram, supply the year represented by the file with `--syslog-year`. The default assumed timezone is UTC; use `--syslog-timezone` to provide the source's fixed UTC offset, such as `+02:00` or `-07:00`. The offset means local time relative to UTC. The year is applied uniformly to every RFC 3164 timestamp; files spanning a year boundary should be split because rollover is not inferred. These options require `--format syslog3164` or `--format auto` and do not change the original timestamp text or range-filter comparisons.
 
@@ -83,9 +97,17 @@ Quote expressions for the shell. On Windows PowerShell and Unix shells, double q
 | --- | --- | --- |
 | `Oct  8 09:15:00 host app[123]: message` | `syslog3164` | Time, host, process, PID, and message. Add `--syslog-year` and, when needed, `--syslog-timezone` for timeline analysis. |
 | `<34>1 2026-10-08T09:15:00Z host app 123 ID47 - message` | `syslog5424` | RFC 5424 header fields and message. |
+| `2026-10-12T09:15:00.123456789Z stdout F application started` | `cri` | Timestamp, `stdout`/`stderr`, fragment tag, and message. |
 | `192.0.2.4 - - [08/Oct/2026:09:15:00 +0200] "GET / HTTP/1.1" 200 42 "-" "agent"` | `apache-combined` or `nginx-combined` | Client IP, request, status, bytes, referrer, agent. |
 | `{"time":"2026-10-08T09:15:00Z","level":"ERROR","message":"timeout"}` | `jsonl` | Canonical timestamp, level, message plus original keys. |
 | `2026-10-08 09:15:00 ERROR timeout` | `custom` | Fields selected by the supplied pattern. |
+
+The `cri` preset parses Kubernetes/containerd records in the form `<RFC3339Nano timestamp> <stdout|stderr> <tag> <message>`. Use `--filter "stream=stderr"` or `--filter "tag=P"` to inspect one stream or partial fragments; `tag=F` marks a complete line. Each physical line remains a separate record in this version, so `P` fragments are not joined automatically. The original CRI line remains intact in text output and exports. `--format auto` detects CRI records, and CRI timestamps are included in `--stats` and multi-file ordering.
+
+```text
+logview pod-container.log --format cri --filter "stream=stderr and tag=F" --regex "connection refused"
+logview pod-container.log --format auto --stats
+```
 
 The `jsonl` preset accepts one JSON object per line and a top-level array containing pretty-printed objects. Each object is one searchable record, even when it spans multiple physical lines. Nested objects and arrays are parsed to a maximum nesting depth of 64; primitive values are addressable by dotted paths such as `employee.department.manager.contact.phone`. A leaf alias such as `phone` also works when that leaf name is unique in the record. Each record has a 16 MiB maximum size and up to 64 extracted fields. Malformed records remain available to raw-line regex search. Docker JSON-file records in an exported copy can map `time` to timestamp and `log` to message. Docker advises against interacting directly with Docker-managed JSON log files; use a copy or supported export route. [Docker documentation](https://docs.docker.com/engine/logging/drivers/json-file/)
 
@@ -134,7 +156,7 @@ logview app.jsonl --profile incident.glogprofile --regex-field 'message=database
 logview app.jsonl --profile incident.glogprofile --tui
 ```
 
-Explicit command-line settings override values loaded from `--profile`. Profile files use the `GLOGVIEW_PROFILE 1` header and plain UTF-8 `key=value` lines. Unknown, duplicate, malformed, or unsupported settings are rejected. Profiles support format, custom pattern, field filter, raw regex, field regex, RFC 3164 year/time zone, and TUI context sizes. A saved profile is never replaced by default; use `--profile-overwrite` together with `--save-profile` to replace it. Profile values cannot contain line breaks.
+Explicit command-line settings override values loaded from `--profile`. Profile files use the `GLOGVIEW_PROFILE 1` header and plain UTF-8 `key=value` lines. Unknown, duplicate, malformed, or unsupported settings are rejected. Profiles support format, custom pattern, field filter, raw regex, field regex, excluded raw-line regex, RFC 3164 year/time zone, and TUI context sizes. A saved profile is never replaced by default; use `--profile-overwrite` together with `--save-profile` to replace it. Profile values cannot contain line breaks.
 
 Range comparisons compare field bytes in lexical order; they do not parse dates or numbers. Fixed-width ISO 8601 timestamps with the same timezone representation sort chronologically. For timestamps with different UTC offsets, normalize the values first. For numbers, use equal-width zero-padded values (for example, `00042`) or a regex suited to the field format.
 
@@ -142,7 +164,7 @@ Range comparisons compare field bytes in lexical order; they do not parse dates 
 
 `--record first` and `--record last` print the complete first or last record matching active filters. For JSON input this includes the original multiline record, useful for inspecting nested keys and timestamp formats. These options cannot be combined with TUI, export, stats, follow, or a result limit.
 
-`--regex` searches the complete raw line. `--regex-field` searches one parsed field. These options combine with `--filter` using AND. The current CLI accepts each option once.
+`--regex` searches the complete raw line. `--regex-field` searches one parsed field. `--exclude-regex` rejects records whose complete raw line matches. These options combine with `--filter` using AND. The current CLI accepts each option once. The TUI applies command-line exclusions during initial indexing, rescans, follow, navigation, and export; press `C` to clear them with the other filters.
 
 ```text
 logview app.log --format jsonl --filter "level=ERROR" --regex "timeout"
@@ -198,7 +220,7 @@ logview app.log --format jsonl --tui
 | `e` / `E` | Go to the next/previous error-level record. |
 | `w` / `W` | Go to the next/previous warning-level record. |
 | `c` | Show or hide the configured number of physical records before and after the selected record. |
-| `b` / `B` | Toggle a bookmark on the selected source line / jump to the next bookmark in source order. |
+| `b` / `B` | Toggle a bookmark on the selected source line / jump to the next bookmark in source order. Bookmarked rows are shown in light green. |
 | `+` / `-` | Increase / decrease both configured context radii. |
 | `C` | Clear the search, field filter, raw regex, and field regex, then rescan the full input. |
 | `z` | Open a scrollable full-screen view of the complete selected record. Use arrows, Page Up/Page Down, Home/End to scroll; press `z`, Enter, or Esc to close. |

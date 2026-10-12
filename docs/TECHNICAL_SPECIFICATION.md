@@ -1,12 +1,12 @@
 # Technical Specification
 
 **Project:** GLogViewer (`logview`)  
-**Status:** 1.0 stable contract with implemented 1.1 and 1.2 additions. Version 1.2 behavior is implemented and passes the Windows build and full CLI suite; POSIX TUI and Linux sanitizer validation remain publication gates. See [validation notes](VALIDATION.md).
+**Status:** 1.5.0 development adds CRI parsing to the implemented 1.4 multi-file workflow. Windows C99 build and full CLI/sample suite are the local verification gates; POSIX, sanitizer, and package checks remain before publication. See [validation notes](VALIDATION.md).
 **Language:** C99; all repository content is English.
 
 ## 1. Purpose and scope
 
-`logview` reads local, line-oriented log files, extracts useful fields, evaluates filters, and presents results through a batch CLI or a terminal UI (TUI). The first release supports one input file per invocation and does not ingest network streams, read native binary journals, or provide a centralized log service. Input files are read-only.
+`logview` reads local, line-oriented log files, extracts useful fields, evaluates filters, and presents results through a batch CLI or a terminal UI (TUI). Multi-file batch mode accepts up to 16 local files and merges parseable timestamps chronologically; TUI and follow remain single-file modes. The tool does not ingest network streams, read native binary journals, or provide a centralized log service. Input files are read-only.
 
 The product is aimed at incident triage, application debugging, HTTP access analysis, and local security investigation. The input may exceed 1 GB. CLI scanning must use memory bounded by configured limits rather than file size. The TUI must remain usable during a scan and must not retain every matching line.
 
@@ -21,19 +21,23 @@ The format list is grounded in source specifications and software documentation.
 | NGINX | Configurable access logs and error logs | remote address, request, status, upstream clues | Combined access preset; custom `log_format` through custom pattern. [NGINX log module](https://nginx.org/en/docs/http/ngx_http_log_module.html), [NGINX logging guide](https://docs.nginx.com/nginx/admin-guide/monitoring/logging/) |
 | Applications, including Java services using Log4j | Text patterns or JSON events | timestamp, severity, message, service, request/trace ID | Custom pattern or simple JSON Lines. [Log4j layouts](https://logging.apache.org/log4j/2.x/manual/layouts.html), [OpenTelemetry log model](https://opentelemetry.io/docs/specs/otel/logs/data-model/) |
 | Docker containers | JSON records with `log`, `stream`, and `time` | stream, timestamp, message | Compatible JSON-object mapping from an exported copy; direct modification of Docker-managed files is discouraged by Docker. [Docker JSON-file driver](https://docs.docker.com/engine/logging/drivers/json-file/) |
-| Kubernetes workloads | Application stdout/stderr wrapped by CRI log records | time, stream, partial/full flag, message | Custom pattern in v1; dedicated CRI preset proposed later. [Kubernetes logging architecture](https://kubernetes.io/docs/concepts/cluster-administration/logging/) |
+| Kubernetes workloads | Application stdout/stderr wrapped by CRI log records | timestamp, stream, tag, message | `cri` preset parses RFC 3339 Nano timestamps and preserves each source line; `P`/`F` fragments are not automatically joined. [Kubernetes CRI logging proposal](https://github.com/kubernetes/design-proposals-archive/blob/main/node/kubelet-cri-logging.md) |
 | Windows Event Log and systemd journal | Native event/journal stores | event ID, unit, priority, message | Native binary/API readers out of scope; consume a line-oriented export. [Windows Event Log reference](https://learn.microsoft.com/en-us/windows/win32/wes/windows-event-log-reference), [systemd journal fields](https://www.freedesktop.org/software/systemd/man/latest/systemd.journal-fields.html) |
 
 JSON Lines specifies UTF-8 and one valid JSON value per line. The `jsonl` preset accepts a bounded subset of JSON objects on individual lines and additionally accepts a top-level array of pretty-printed objects as a practical extension for exported datasets. It does not claim to accept every JSON value or every JSON document form. [JSON Lines specification](https://jsonlines.org/)
+
+### CRI parser
+
+The `cri` preset accepts `<timestamp> <stream> <tag> <message>`, where timestamp is an RFC 3339 Nano value, stream is exactly `stdout` or `stderr`, and tag is a non-empty token. It exposes `timestamp`, `stream`, `tag`, and `message`. The parser validates timestamp shape, calendar ranges, fractional precision up to nine digits, and UTC offsets. It preserves each physical source line as one record; `P` (partial) and `F` (full) values remain separate records and can be selected with `--filter "tag=P"` or `--filter "tag=F"`. Automatic fragment joining is not included. `--format auto` scores CRI alongside the existing presets.
 
 ## 3. Functional contract
 
 | ID | Requirement | Acceptance result |
 | --- | --- | --- |
 | RF-01 | Stream one regular file larger than 1 GB | No file-size-proportional heap growth during a CLI scan. |
-| RF-02 | Parse `syslog3164`, `syslog5424`, `apache-common`, `apache-combined`, `nginx-combined`, `jsonl`, and `custom` | Golden fixtures produce documented normalized fields. |
+| RF-02 | Parse `syslog3164`, `syslog5424`, `cri`, `apache-common`, `apache-combined`, `nginx-combined`, `jsonl`, and `custom` | Golden fixtures produce documented normalized fields. |
 | RF-03 | Compile custom `%{TOKEN}` and `%{TOKEN:name}` patterns | Valid patterns extract fields; invalid/ambiguous patterns fail before scanning. |
-| RF-04 | Filter raw lines or individual fields with built-in regex | Match spans and field predicates agree with test vectors. |
+| RF-04 | Include or exclude raw lines and filter individual fields with built-in regex | Match spans, exclusions, and field predicates agree with test vectors. |
 | RF-05 | Combine predicates with `and`, `or`, and parentheses | Precedence and missing-field behavior match section 7. |
 | RF-06 | TUI navigation, incremental search, match highlighting, help | Interactive smoke tests on all target OSes. |
 | RF-07 | Follow appended lines | Complete new lines appear without duplicates; rotation/truncation follows section 10. |
@@ -56,9 +60,10 @@ Parse failures retain `raw` and source position for raw regex filtering and TUI 
 ## 5. Proposed CLI and exit behavior
 
 ```text
-logview <file> [--format auto|raw|syslog3164|syslog5424|apache-common|apache-combined|nginx-combined|jsonl|custom]
+logview <file> [--format auto|raw|syslog3164|syslog5424|cri|apache-common|apache-combined|nginx-combined|jsonl|custom]
                [--pattern <pattern>] [--filter <expression>] [--regex <regex>]
-               [--regex-field <field>=<regex>] [--stats [--stats-field FIELD]]
+               [--regex-field <field>=<regex>] [--exclude-regex <regex>]
+               [--stats [--stats-field FIELD]]
                [--syslog-year YYYY] [--syslog-timezone +/-HH:MM]
                [--profile <file>] [--save-profile <file> [--profile-overwrite]]
                [--context-before <n>] [--context-after <n>]
@@ -69,7 +74,7 @@ logview --help
 logview --version
 ```
 
-`auto` samples at most 32 complete lines or 256 KiB and chooses a preset only on a unique, confident match; otherwise it treats records as raw text. `raw` bypasses parsing and exposes only the raw line and source position. Users can select `--format custom --pattern ...` for unknown formats. Multiple `--regex` or `--regex-field` options are combined with logical AND and also ANDed with `--filter`. `--pattern` is legal only with `custom`. `--follow` with `--stats` or `--export` is invalid in 1.0. `--output` requires `--export`; exports fail rather than overwrite an existing file unless `--force` is supplied. `--tui` requires both input and output terminals; otherwise the command fails with an argument error. Without `--tui`, matching records go to standard output, except `--stats` which prints a summary.
+`auto` samples at most 32 complete lines or 256 KiB and chooses a preset only on a unique, confident match; otherwise it treats records as raw text. `raw` bypasses parsing and exposes only the raw line and source position. Users can select `--format custom --pattern ...` for unknown formats. `--regex`, `--regex-field`, and `--exclude-regex` are each accepted once and combine with the field filter using AND. `--exclude-regex` rejects a record when the pattern matches its complete raw line. `--pattern` is legal only with `custom`. `--follow` with `--stats` or `--export` is invalid. `--output` requires `--export`; exports fail rather than overwrite an existing file unless `--force` is supplied. `--tui` requires both input and output terminals; otherwise the command fails with an argument error. Without `--tui`, matching records go to standard output, except `--stats` which prints a summary.
 
 | Code | Meaning | Examples |
 | --- | --- | --- |
@@ -80,7 +85,7 @@ logview --version
 
 Diagnostics go to standard error. On an output write failure the process returns 2, even after partial output. Error 3 is detected before opening an export file when possible. No-match status does not apply to an unfiltered empty stats report.
 
-Query profiles use the text line format `GLOGVIEW_PROFILE 1` followed by unique `key=value` lines. Supported keys are `format`, `pattern`, `filter`, `regex`, `regex_field`, `syslog_year`, `syslog_timezone`, `context_before`, and `context_after`. Values are limited to 4095 bytes and may not contain CR or LF. Unknown keys, duplicate keys, invalid values, and unsupported profile versions are errors. CLI values override loaded profile values. Saving refuses to replace an existing path unless `--profile-overwrite` is also supplied. The profile save path must differ textually from the input path.
+Query profiles use the text line format `GLOGVIEW_PROFILE 1` followed by unique `key=value` lines. Supported keys are `format`, `pattern`, `filter`, `regex`, `regex_field`, `exclude_regex`, `syslog_year`, `syslog_timezone`, `context_before`, and `context_after`. Values are limited to 4095 bytes and may not contain CR or LF. Unknown keys, duplicate keys, invalid values, and unsupported profile versions are errors. CLI values override loaded profile values. Saving refuses to replace an existing path unless `--profile-overwrite` is also supplied. The profile save path must differ textually from the input path.
 
 ## 6. Parsing patterns
 
@@ -112,9 +117,17 @@ operator   := '=' | '!=' | '~'
 value      := bare_token | double_quoted_string
 ```
 
-`and` binds more tightly than `or`. `=` and `!=` compare complete field values byte-for-byte; `~` searches for a regex anywhere within the named field; `<`, `<=`, `>`, and `>=` perform bytewise lexical comparisons. Double-quoted strings allow `\"` and `\\`. The `raw` field is always present. For example, `level=ERROR and (request_id=ab12 or message~"timeout")`. A field that is absent makes every predicate false, including `!=`. Range operators do not parse numbers or dates: fixed-width ISO 8601 values with the same timezone representation sort chronologically, while differing timezone offsets must be normalized first. `--regex` searches the full raw line; `--regex-field message=timeout` searches only `message`. Regex matching is case-sensitive, byte-oriented, and ASCII for `\d`, `\w`, and `\s`; UTF-8 non-ASCII bytes are matched literally or by `.`. No Unicode case folding is implied.
+`and` binds more tightly than `or`. `=` and `!=` compare complete field values byte-for-byte; `~` searches for a regex anywhere within the named field; `<`, `<=`, `>`, and `>=` perform bytewise lexical comparisons. Double-quoted strings allow `\"` and `\\`. The `raw` field is always present. For example, `level=ERROR and (request_id=ab12 or message~"timeout")`. A field that is absent makes every predicate false, including `!=`. Range operators do not parse numbers or dates: fixed-width ISO 8601 values with the same timezone representation sort chronologically, while differing timezone offsets must be normalized first. `--regex` searches the full raw line; `--regex-field message=timeout` searches only `message`; `--exclude-regex error` rejects raw lines containing `error`. Regex matching is case-sensitive, byte-oriented, and ASCII for `\d`, `\w`, and `\s`; UTF-8 non-ASCII bytes are matched literally or by `.`. No Unicode case folding is implied.
 
 `--top N` retains the first N selected records. `--bottom N` streams selected raw records to a temporary file and retains an N-element offset/length index before replaying the final records in source order. The TUI stores only the final N row checkpoints for bottom mode. Both forms scan the complete source except that batch `--top` can stop as soon as N matches are emitted. N is limited to 1,000,000. Limited TUI views disable source-line jump because that index refers to the full source rather than the displayed subset. `--record first|last` emits the full original first or last selected record, including multiline JSON; last-record mode retains at most one record in memory, within the configured record-size limit.
+
+### Multi-file batch mode
+
+Provide two or more file paths before or after the shared options, for example `logview api-a.jsonl api-b.jsonl --format jsonl`. Up to 16 input files are accepted. One explicit format and custom pattern apply to every source; `--format auto` detects each independently. Directory paths and duplicate file identities are rejected. The inputs must be seekable local files; `-` is not accepted. Multi-file mode does not support `--tui`, `--follow`, `--top`, `--bottom`, or `--record`.
+
+Records with supported timestamps are merged in ascending UTC epoch. Every source must be nondecreasing across its parseable timestamps, even when a record is excluded by the active filters. A timestamp decrease stops processing with exit code 2. For equal timestamps, command-line argument order wins; records from one source retain their source-line order. Records with absent or unrecognized timestamps are emitted after all timestamped records, grouped by input argument order and then source-line order. This makes their placement explicit without pretending they have a chronological position.
+
+Text output prefixes each record with `[source-path:source-line]`. CSV exports always include `source_file`; when `--columns` is supplied, the column is appended if omitted. Line numbers refer to the start of a source record. `--stats` aggregates all selected records and builds one timeline over the combined timestamp range. Heap use is bounded by the 16 source readers, their reusable input buffers, and at most one current record per source, so its record-memory component is O(input-count × max-line-bytes); it does not grow with total file size. Timestamp values and untimestamped records are staged in temporary files. Temporary storage can therefore approach the selected input size for sources with many unknown timestamps.
 
 Regex syntax in v1: literals, escaped metacharacters, `.`, `*`, `+`, `?`, `[abc]`, ranges such as `[a-z]`, negated classes, `\d`, `\w`, `\s`, `^`, `$`, capturing parentheses, and `|`. `.` excludes LF and CR. `^` and `$` refer to the beginning and end of the target field or raw line. Empty alternatives and empty groups are valid. Invalid ranges, dangling escapes, unmatched parentheses/brackets, and a quantifier without an operand are compile errors. Backreferences, lookaround, lazy quantifiers, and `{m,n}` are unsupported. The first leftmost match is used for highlighting; zero-length matches advance by one byte before seeking the next highlight.
 

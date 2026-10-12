@@ -92,17 +92,30 @@ FollowResult follow_wait(FILE **input, const char *path, LineReader *reader,
                          uint64_t observed_end, int pending_partial,
                          uint64_t *line_number_base)
 {
+    int path_was_missing = 0;
     for (;;) {
         FollowStat current;
         FollowStat named;
+        int has_current;
+        int has_named;
         if (logview_stop_requested) return FOLLOW_STOPPED;
-        if (file_status(*input, &current) && path_status(path, &named)) {
+        has_current = file_status(*input, &current);
+        has_named = path_status(path, &named);
+        if (!has_named) path_was_missing = 1;
+        if (has_current && has_named) {
 #ifdef _WIN32
-            if (!path_matches_open_file(*input, path)) {
+            if (path_was_missing || !path_matches_open_file(*input, path)) {
 #else
-            if (!same_identity(&current, &named)) {
+            if (path_was_missing || !same_identity(&current, &named)) {
 #endif
-                if (!pending_partial && current.st_size >= 0 &&
+                if (!pending_partial &&
+                    (!path_was_missing ||
+#ifdef _WIN32
+                     !path_matches_open_file(*input, path)) &&
+#else
+                     !same_identity(&current, &named)) &&
+#endif
+                    current.st_size >= 0 &&
                     (uint64_t)current.st_size > reader->next_offset) {
                     if (!reader_reposition(reader, reader->next_offset,
                                            *line_number_base)) return FOLLOW_ERROR;
@@ -119,6 +132,7 @@ FollowResult follow_wait(FILE **input, const char *path, LineReader *reader,
                     fclose(*input);
                     *input = replacement;
                     *line_number_base = 0;
+                    path_was_missing = 0;
                     return FOLLOW_READY;
                 }
             } else if (named.st_size < 0 ||
@@ -182,5 +196,51 @@ FollowResult follow_poll(FILE **input, const char *path, LineReader *reader,
                                *line_number_base)) return FOLLOW_ERROR;
         return FOLLOW_READY;
     }
+    return FOLLOW_IDLE;
+}
+
+FollowResult follow_reopen_after_read_error(FILE **input, const char *path,
+                                            LineReader *reader,
+                                            uint64_t *line_number_base)
+{
+    unsigned int attempt;
+    for (attempt = 0; attempt < 8u; attempt++) {
+        FollowStat current;
+        FollowStat named;
+        FILE *replacement;
+        uint64_t resume_offset = 0;
+        uint64_t resume_line_number = 0;
+        int same_file = 0;
+        if (logview_stop_requested) return FOLLOW_STOPPED;
+        replacement = fopen(path, "rb");
+        if (replacement == NULL) {
+            pause_poll();
+            continue;
+        }
+        if (file_status(*input, &current) && path_status(path, &named)) {
+#ifdef _WIN32
+            same_file = path_matches_open_file(*input, path);
+#else
+            same_file = same_identity(&current, &named);
+#endif
+            if (same_file && current.st_size >= 0 && named.st_size >= 0 &&
+                current.st_size == named.st_size &&
+                (uint64_t)named.st_size >= reader->next_offset) {
+                resume_offset = reader->next_offset;
+                resume_line_number = *line_number_base;
+            }
+        }
+        reader->file = replacement;
+        if (!reader_reposition(reader, resume_offset, resume_line_number)) {
+            reader->file = *input;
+            fclose(replacement);
+            return FOLLOW_ERROR;
+        }
+        fclose(*input);
+        *input = replacement;
+        *line_number_base = resume_line_number;
+        return FOLLOW_READY;
+    }
+    if (logview_stop_requested) return FOLLOW_STOPPED;
     return FOLLOW_IDLE;
 }

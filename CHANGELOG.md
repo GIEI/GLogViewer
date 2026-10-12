@@ -1,5 +1,39 @@
 # GLogViewer Changelog
 
+## 1.5.0 (development)
+
+Adds native parsing for Kubernetes CRI container log files.
+
+### Included
+
+- Add the `cri` format for RFC 3339 Nano timestamp, `stdout`/`stderr` stream, tag, and message fields.
+- Detect CRI records with `--format auto` and include timestamps in sorting and statistics.
+- Add `--exclude-regex` to omit matching raw records in batch, export, statistics, follow, and TUI modes; save it in query profiles.
+- Keep each physical CRI line intact; expose `P` and `F` tags for filtering without silently joining partial fragments.
+- Test explicit parsing, field filters, auto-detection, timestamp statistics, invalid dates, and invalid streams.
+
+### Validation status
+
+- Windows C99 build and complete CLI/sample suite pass locally; Linux/macOS, sanitizer, and package gates remain before publication.
+
+## 1.4.0 (development)
+
+Adds batch correlation across multiple timestamped files.
+
+### Included
+
+- Accept up to 16 input files and merge parseable timestamps in chronological order.
+- Label text output with source path and source line; always include `source_file` in multi-file CSV exports.
+- Define equal-timestamp ordering by command-line file order and source-line order.
+- Place records without usable timestamps after timestamped records in stable file and line order.
+- Reject duplicate files and timestamp-decreasing sources; allow independent format detection with `--format auto`.
+- Aggregate multi-file statistics and add coverage for merging, labels, missing timestamps, ties, duplicates, and invalid source order.
+
+### Validation status
+
+- Windows C99 build and complete CLI/sample suite pass locally.
+- Linux/macOS, sanitizer, and package release gates remain required before publication.
+
 ## 1.3.0 (development)
 
 Adds repeatable query workflows and faster return to records of interest.

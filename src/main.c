@@ -21,14 +21,18 @@
 #include <windows.h>
 #endif
 
-#define LOGVIEW_VERSION "1.3.0"
+#define LOGVIEW_VERSION "1.5.0"
 #define FIELD_NAME_CAPACITY 256
 #define PROFILE_VALUE_CAPACITY 4096
+#define LOGVIEW_MAX_INPUTS 16
 
 typedef struct {
     const char *input_path;
+    const char *input_paths[LOGVIEW_MAX_INPUTS];
+    size_t input_count;
     const char *filter_argument;
     const char *raw_regex_argument;
+    const char *exclude_regex_argument;
     const char *field_regex_argument;
     size_t max_line_bytes;
     InputFormat format;
@@ -62,6 +66,7 @@ typedef struct {
     char profile_pattern[PROFILE_VALUE_CAPACITY];
     char profile_filter[PROFILE_VALUE_CAPACITY];
     char profile_regex[PROFILE_VALUE_CAPACITY];
+    char profile_exclude_regex[PROFILE_VALUE_CAPACITY];
     char profile_field_regex[PROFILE_VALUE_CAPACITY];
 } Options;
 
@@ -80,9 +85,10 @@ static void request_stop(int signal_number)
 
 static void print_usage(FILE *stream)
 {
-    fputs("Usage: logview <file> [--format FORMAT] [--pattern PATTERN]\n"
+    fputs("Usage: logview <file> [<file> ...] [--format FORMAT] [--pattern PATTERN]\n"
           "                [--filter EXPRESSION]\n"
           "                [--regex pattern] [--regex-field field=pattern]\n"
+          "                [--exclude-regex pattern]\n"
           "                [--export text|csv --output path [--columns list] [--force]]\n"
           "                [--stats]\n"
           "                [--stats-field FIELD]\n"
@@ -95,13 +101,15 @@ static void print_usage(FILE *stream)
           "                [--max-line-bytes count]\n"
           "\n"
           "Options:\n"
-          "  --format FORMAT          raw, jsonl, syslog3164, syslog5424,\n"
+          "  --format FORMAT          raw, jsonl, syslog3164, syslog5424, cri,\n"
           "                           apache-common, apache-combined, nginx-combined,\n"
           "                           custom, or auto (default: raw).\n"
+          "                           With multiple files (up to 16), one shared format is used; auto detects each file.\n"
           "  --pattern PATTERN        Define a custom %{TOKEN} parsing pattern.\n"
           "  --filter EXPRESSION      Combine field tests with =, !=, ~, <, <=, >, >=, and/or.\n"
           "  --regex pattern          Match a regular expression against each raw line.\n"
           "  --regex-field f=pattern  Match a regular expression against one field.\n"
+          "  --exclude-regex pattern  Exclude records matching a raw-line regex.\n"
           "  --export text|csv        Write selected records to an output file.\n"
           "  --output path            Set the export destination.\n"
           "  --columns list           Set CSV columns (comma-separated field names).\n"
@@ -183,6 +191,7 @@ static const char *profile_format_name(InputFormat format)
     case FORMAT_JSONL: return "jsonl";
     case FORMAT_SYSLOG3164: return "syslog3164";
     case FORMAT_SYSLOG5424: return "syslog5424";
+    case FORMAT_CRI: return "cri";
     case FORMAT_APACHE_COMMON: return "apache-common";
     case FORMAT_APACHE_COMBINED: return "apache-combined";
     case FORMAT_NGINX_COMBINED: return "nginx-combined";
@@ -271,6 +280,7 @@ static int load_query_profile(Options *options)
         else if (strcmp(line, "syslog_timezone") == 0) bit = 1u << 6;
         else if (strcmp(line, "context_before") == 0) bit = 1u << 7;
         else if (strcmp(line, "context_after") == 0) bit = 1u << 8;
+        else if (strcmp(line, "exclude_regex") == 0) bit = 1u << 9;
         else goto invalid_profile;
         if ((seen & bit) != 0) goto invalid_profile;
         seen |= bit;
@@ -312,6 +322,9 @@ static int load_query_profile(Options *options)
         } else if (bit == (1u << 8)) {
             if (!parse_context_size(value, &profile_after)) goto invalid_profile;
             after_set = 1;
+        } else if (bit == (1u << 9)) {
+            if (!profile_copy_value(options->profile_exclude_regex,
+                                    sizeof(options->profile_exclude_regex), value)) goto invalid_profile;
         }
     }
     if (ferror(file)) {
@@ -333,6 +346,8 @@ static int load_query_profile(Options *options)
         options->filter_argument = options->profile_filter;
     if (options->raw_regex_argument == NULL && options->profile_regex[0] != '\0')
         options->raw_regex_argument = options->profile_regex;
+    if (options->exclude_regex_argument == NULL && options->profile_exclude_regex[0] != '\0')
+        options->exclude_regex_argument = options->profile_exclude_regex;
     if (options->field_regex_argument == NULL && options->profile_field_regex[0] != '\0')
         options->field_regex_argument = options->profile_field_regex;
     if (profile_year_set && options->syslog_year == 0 &&
@@ -360,11 +375,18 @@ static int save_query_profile(const Options *options)
     FILE *existing;
     FILE *file;
     const char *format = profile_format_name(options->format);
-    int absolute_timezone = options->syslog_timezone_offset_seconds;
+    int timezone_offset = options->syslog_timezone_offset_seconds;
+    uint64_t absolute_timezone;
+    unsigned int timezone_hours;
+    unsigned int timezone_minutes;
     char timezone[8];
-    if (strcmp(options->save_profile_path, options->input_path) == 0) {
-        fputs("logview: query profile path must not be the input file.\n", stderr);
-        return 0;
+    size_t input_index;
+    for (input_index = 0; input_index < options->input_count; input_index++) {
+        if (output_paths_same_file(options->save_profile_path,
+                                   options->input_paths[input_index])) {
+            fputs("logview: query profile path must not be an input file.\n", stderr);
+            return 0;
+        }
     }
     existing = fopen(options->save_profile_path, "rb");
     if (existing != NULL) {
@@ -381,10 +403,23 @@ static int save_query_profile(const Options *options)
                 options->save_profile_path);
         return 0;
     }
-    if (absolute_timezone < 0) absolute_timezone = -absolute_timezone;
-    snprintf(timezone, sizeof(timezone), "%c%02d:%02d",
-             options->syslog_timezone_offset_seconds < 0 ? '-' : '+',
-             absolute_timezone / 3600, (absolute_timezone % 3600) / 60);
+    absolute_timezone = timezone_offset < 0 ?
+        (uint64_t)(-(int64_t)timezone_offset) : (uint64_t)timezone_offset;
+    if (absolute_timezone > 23u * 3600u + 59u * 60u ||
+        absolute_timezone % 60u != 0) {
+        fclose(file);
+        fputs("logview: invalid query-profile time zone offset.\n", stderr);
+        return 0;
+    }
+    timezone_hours = (unsigned int)(absolute_timezone / 3600u);
+    timezone_minutes = (unsigned int)((absolute_timezone % 3600u) / 60u);
+    timezone[0] = timezone_offset < 0 ? '-' : '+';
+    timezone[1] = (char)('0' + timezone_hours / 10u);
+    timezone[2] = (char)('0' + timezone_hours % 10u);
+    timezone[3] = ':';
+    timezone[4] = (char)('0' + timezone_minutes / 10u);
+    timezone[5] = (char)('0' + timezone_minutes % 10u);
+    timezone[6] = '\0';
     if ((options->custom_pattern != NULL &&
          !profile_copy_value((char[PROFILE_VALUE_CAPACITY]){0},
                              PROFILE_VALUE_CAPACITY, options->custom_pattern)) ||
@@ -394,6 +429,9 @@ static int save_query_profile(const Options *options)
         (options->raw_regex_argument != NULL &&
          !profile_copy_value((char[PROFILE_VALUE_CAPACITY]){0},
                              PROFILE_VALUE_CAPACITY, options->raw_regex_argument)) ||
+        (options->exclude_regex_argument != NULL &&
+         !profile_copy_value((char[PROFILE_VALUE_CAPACITY]){0},
+                             PROFILE_VALUE_CAPACITY, options->exclude_regex_argument)) ||
         (options->field_regex_argument != NULL &&
          !profile_copy_value((char[PROFILE_VALUE_CAPACITY]){0},
                              PROFILE_VALUE_CAPACITY, options->field_regex_argument))) {
@@ -402,12 +440,13 @@ static int save_query_profile(const Options *options)
         return 0;
     }
     if (format == NULL ||
-        fprintf(file, "GLOGVIEW_PROFILE 1\nformat=%s\npattern=%s\nfilter=%s\nregex=%s\nregex_field=%s\nsyslog_year=%u\nsyslog_timezone=%s\ncontext_before=%u\ncontext_after=%u\n",
+        fprintf(file, "GLOGVIEW_PROFILE 1\nformat=%s\npattern=%s\nfilter=%s\nregex=%s\nregex_field=%s\nexclude_regex=%s\nsyslog_year=%u\nsyslog_timezone=%s\ncontext_before=%u\ncontext_after=%u\n",
                 format,
                 options->custom_pattern == NULL ? "" : options->custom_pattern,
                 options->filter_argument == NULL ? "" : options->filter_argument,
                 options->raw_regex_argument == NULL ? "" : options->raw_regex_argument,
                 options->field_regex_argument == NULL ? "" : options->field_regex_argument,
+                options->exclude_regex_argument == NULL ? "" : options->exclude_regex_argument,
                 options->syslog_year,
                 options->syslog_timezone_set ? timezone : "",
                 (unsigned)options->context_before,
@@ -495,6 +534,11 @@ static int parse_options(int argc, char **argv, Options *options)
                 return -1;
             }
             options->field_regex_argument = argv[index];
+            continue;
+        }
+        if (strcmp(argument, "--exclude-regex") == 0) {
+            if (++index >= argc || options->exclude_regex_argument != NULL) return -1;
+            options->exclude_regex_argument = argv[index];
             continue;
         }
         if (strcmp(argument, "--export") == 0) {
@@ -620,14 +664,13 @@ static int parse_options(int argc, char **argv, Options *options)
         if (argument[0] == '-' && argument[1] != '\0') {
             return -1;
         }
-        if (options->input_path != NULL) {
-            return -1;
-        }
-        options->input_path = argument;
+        if (options->input_count >= LOGVIEW_MAX_INPUTS) return -1;
+        options->input_paths[options->input_count++] = argument;
     }
-    if (options->input_path == NULL) {
+    if (options->input_count == 0) {
         return -1;
     }
+    options->input_path = options->input_paths[0];
     if (options->profile_path != NULL && !load_query_profile(options)) return -1;
     if (options->profile_overwrite && options->save_profile_path == NULL) return -1;
     if ((options->format == FORMAT_CUSTOM) != (options->custom_pattern != NULL)) return -1;
@@ -650,6 +693,20 @@ static int parse_options(int argc, char **argv, Options *options)
                               options->flush_partial || options->record_mode != 0)) return -1;
     if (options->record_mode != 0 && options->result_limit != 0) return -1;
     if (options->record_mode != 0 && options->export_set) return -1;
+    if (options->input_count > 1 &&
+        (options->tui_mode || options->follow_mode || options->result_limit != 0 ||
+         options->record_mode != 0)) return -1;
+    if (options->input_count > 1) {
+        size_t left;
+        size_t right;
+        for (left = 0; left < options->input_count; left++) {
+            if (strcmp(options->input_paths[left], "-") == 0) return -1;
+            for (right = left + 1; right < options->input_count; right++) {
+                if (strcmp(options->input_paths[left], options->input_paths[right]) == 0)
+                    return -1;
+            }
+        }
+    }
     return 0;
 }
 
@@ -785,7 +842,8 @@ done:
 static int accumulate_timeline(FILE *input, LineReader *reader,
                                const Options *options, JsonScratch *scratch,
                                Filter *field_filter, Regex *raw_regex,
-                               Regex *field_regex, const char *regex_field_name,
+                               Regex *field_regex, Regex *exclude_regex,
+                               const char *regex_field_name,
                                LogStats *stats)
 {
     const unsigned char *line;
@@ -829,6 +887,11 @@ static int accumulate_timeline(FILE *input, LineReader *reader,
             if (regex_result == REGEX_WORK_LIMIT) return 0;
             selected = regex_result == REGEX_MATCH;
         }
+        if (selected && exclude_regex != NULL) {
+            RegexResult regex_result = regex_search(exclude_regex, line, line_length);
+            if (regex_result == REGEX_WORK_LIMIT) return 0;
+            if (regex_result == REGEX_MATCH) selected = 0;
+        }
         if (selected && field_regex != NULL) {
             ByteSpan field_value;
             if (!log_entry_find_field(&entry, regex_field_name, &field_value)) selected = 0;
@@ -844,6 +907,395 @@ static int accumulate_timeline(FILE *input, LineReader *reader,
     }
 }
 
+typedef struct {
+    const char *path;
+    FILE *file;
+    LineReader reader;
+    InputFormat format;
+    int reader_ready;
+    int has_head;
+    int diagnostic_emitted;
+    int has_last_timestamp;
+    int64_t head_timestamp;
+    int64_t last_timestamp;
+    uint64_t head_line_number;
+    uint64_t head_byte_offset;
+    const unsigned char *head_data;
+    size_t head_length;
+    FILE *unknown_spool;
+} MultiInput;
+
+typedef struct {
+    uint64_t line_number;
+    uint64_t length;
+} MultiSpoolHeader;
+
+static int multi_parse_entry(const Options *options, InputFormat format,
+                             JsonScratch *scratch, const unsigned char *data,
+                             size_t length, uint64_t line_number,
+                             uint64_t byte_offset, LogEntry *entry)
+{
+    entry->raw.data = data;
+    entry->raw.length = length;
+    entry->line_number = line_number;
+    entry->byte_offset = byte_offset;
+    entry->field_count = 0;
+    entry->parse_ok = format == FORMAT_RAW;
+    if (format == FORMAT_JSONL) return jsonl_parse(entry, scratch);
+    if (format == FORMAT_CUSTOM)
+        return parser_custom_line(options->custom_pattern, entry);
+    if (format != FORMAT_RAW) return parser_format_line(format, entry);
+    return 1;
+}
+
+static int multi_spool_unknown(MultiInput *input, const LogEntry *entry)
+{
+    MultiSpoolHeader header;
+    if (input->unknown_spool == NULL) input->unknown_spool = tmpfile();
+    if (input->unknown_spool == NULL) return 0;
+    header.line_number = entry->line_number;
+    header.length = (uint64_t)entry->raw.length;
+    return fwrite(&header, sizeof(header), 1, input->unknown_spool) == 1 &&
+           (entry->raw.length == 0 ||
+            fwrite(entry->raw.data, 1, entry->raw.length,
+                   input->unknown_spool) == entry->raw.length);
+}
+
+static int multi_load_head(MultiInput *input, const Options *options,
+                           JsonScratch *scratch, Filter *field_filter,
+                           Regex *raw_regex, Regex *field_regex,
+                           Regex *exclude_regex, const char *regex_field_name,
+                           LogStats *stats,
+                           FILE *timestamp_spool, uint64_t *matched_count,
+                           uint64_t *rejected_count)
+{
+    const unsigned char *line;
+    size_t length;
+    uint64_t line_number;
+    uint64_t byte_offset;
+    for (;;) {
+        LogEntry entry;
+        ReaderResult read_result = input->format == FORMAT_JSONL ?
+            reader_next_json(&input->reader, &line, &length, &line_number,
+                             &byte_offset, NULL, NULL) :
+            reader_next(&input->reader, &line, &length, &line_number,
+                        &byte_offset);
+        int selected = 1;
+        ByteSpan timestamp;
+        int64_t epoch = 0;
+        int has_timestamp = 0;
+        if (read_result == READER_EOF) {
+            input->has_head = 0;
+            return 1;
+        }
+        if (read_result == READER_ERROR) return 0;
+        if (options->stats_mode &&
+            (read_result == READER_LINE || read_result == READER_TOO_LONG) &&
+            !stats_physical(stats)) return 0;
+        if (read_result == READER_TOO_LONG) {
+            if (*rejected_count == UINT64_MAX) return 0;
+            (*rejected_count)++;
+            if (options->stats_mode && !stats_rejected(stats)) return 0;
+            continue;
+        }
+        if (memchr(line, 0, length) != NULL) {
+            if (*rejected_count == UINT64_MAX) return 0;
+            (*rejected_count)++;
+            if (options->stats_mode && !stats_rejected(stats)) return 0;
+            continue;
+        }
+        if (!multi_parse_entry(options, input->format, scratch, line, length,
+                               line_number, byte_offset, &entry)) {
+            entry.field_count = 0;
+            entry.parse_ok = 0;
+            if (*rejected_count == UINT64_MAX) return 0;
+            (*rejected_count)++;
+            if (options->stats_mode && !stats_rejected(stats)) return 0;
+        }
+        if (options->stats_mode && entry.parse_ok && !stats_parsed(stats)) return 0;
+        if (log_entry_find_field(&entry, "timestamp", &timestamp) &&
+            stats_timestamp_epoch_configured(timestamp,
+                                              &stats->timestamp_config, &epoch)) {
+            has_timestamp = 1;
+            if (input->has_last_timestamp && epoch < input->last_timestamp) {
+                fprintf(stderr,
+                        "logview: '%s' is not ordered by timestamp at source line %llu.\n",
+                        input->path, (unsigned long long)line_number);
+                input->diagnostic_emitted = 1;
+                return 0;
+            }
+            input->last_timestamp = epoch;
+            input->has_last_timestamp = 1;
+        }
+        if (field_filter != NULL) {
+            RegexResult filter_result = REGEX_NO_MATCH;
+            selected = filter_matches(field_filter, &entry, &filter_result);
+            if (filter_result == REGEX_WORK_LIMIT) return 0;
+        }
+        if (selected && raw_regex != NULL) {
+            RegexResult regex_result = regex_search(raw_regex, line, length);
+            if (regex_result == REGEX_WORK_LIMIT) return 0;
+            selected = regex_result == REGEX_MATCH;
+        }
+        if (selected && exclude_regex != NULL) {
+            RegexResult regex_result = regex_search(exclude_regex, line, length);
+            if (regex_result == REGEX_WORK_LIMIT) return 0;
+            if (regex_result == REGEX_MATCH) selected = 0;
+        }
+        if (selected && field_regex != NULL) {
+            ByteSpan value;
+            if (!log_entry_find_field(&entry, regex_field_name, &value)) selected = 0;
+            else {
+                RegexResult regex_result = regex_search(field_regex,
+                                                        value.data, value.length);
+                if (regex_result == REGEX_WORK_LIMIT) return 0;
+                selected = regex_result == REGEX_MATCH;
+            }
+        }
+        if (!selected) continue;
+        if (*matched_count == UINT64_MAX) return 0;
+        (*matched_count)++;
+        if (options->stats_mode && !stats_selected(stats, &entry)) return 0;
+        if (has_timestamp) {
+            if (timestamp_spool != NULL &&
+                fwrite(&epoch, sizeof(epoch), 1, timestamp_spool) != 1) return 0;
+            input->head_timestamp = epoch;
+            input->head_line_number = line_number;
+            input->head_byte_offset = byte_offset;
+            input->head_data = line;
+            input->head_length = length;
+            input->has_head = 1;
+            return 1;
+        }
+        if (!multi_spool_unknown(input, &entry)) return 0;
+    }
+}
+
+static int run_multi_input(const Options *options, Filter *field_filter,
+                           Regex *raw_regex, Regex *field_regex,
+                           Regex *exclude_regex, const char *regex_field_name,
+                           LogStats *stats,
+                           uint64_t *matched_count, uint64_t *rejected_count)
+{
+    MultiInput inputs[LOGVIEW_MAX_INPUTS];
+    JsonScratch scratch;
+    int scratch_ready = 0;
+    OutputSink output;
+    int output_ready = 0;
+    FILE *timestamp_spool = NULL;
+    size_t index;
+    int result = 2;
+    char error[160] = {0};
+    memset(inputs, 0, sizeof(inputs));
+    if (options->format == FORMAT_JSONL || options->format == FORMAT_AUTO) {
+        if (!json_scratch_init(&scratch, options->max_line_bytes)) {
+            fputs("logview: cannot allocate JSON parsing memory.\n", stderr);
+            goto done;
+        }
+        scratch_ready = 1;
+    }
+    for (index = 0; index < options->input_count; index++) {
+        size_t prior;
+        inputs[index].path = options->input_paths[index];
+        for (prior = 0; prior < index; prior++) {
+            if (output_paths_same_file(inputs[prior].path, inputs[index].path)) {
+                fprintf(stderr, "logview: input '%s' was specified more than once.\n",
+                        inputs[index].path);
+                result = 3;
+                goto done;
+            }
+        }
+        inputs[index].file = open_input_file(inputs[index].path, 1);
+        if (inputs[index].file == NULL) {
+            print_io_error("cannot open", inputs[index].path);
+            goto done;
+        }
+        if (!reader_init(&inputs[index].reader, inputs[index].file,
+                         options->max_line_bytes)) {
+            fputs("logview: cannot initialize a line reader.\n", stderr);
+            goto done;
+        }
+        inputs[index].reader_ready = 1;
+        inputs[index].format = options->format;
+        if (inputs[index].format == FORMAT_AUTO &&
+            !detect_file_format(inputs[index].file, &inputs[index].reader,
+                                options->max_line_bytes, &inputs[index].format)) {
+            fprintf(stderr, "logview: cannot detect format of '%s'.\n",
+                    inputs[index].path);
+            goto done;
+        }
+    }
+    if (options->output_path != NULL) {
+        for (index = 0; index < options->input_count; index++) {
+            if (output_paths_same_file(options->output_path, inputs[index].path)) {
+                fputs("logview: output path refers to an input file.\n", stderr);
+                result = 3;
+                goto done;
+            }
+        }
+    }
+    if (!output_init(&output, options->output_path, options->input_path,
+                     options->export_set ? options->export_format : OUTPUT_TEXT,
+                     options->column_list, options->force_output,
+                     options->input_count > 1, error, sizeof(error))) {
+        fprintf(stderr, "logview: %s.\n", error);
+        output_ready = output.stream != NULL;
+        goto done;
+    }
+    output_ready = 1;
+    if (options->stats_mode) {
+        timestamp_spool = tmpfile();
+        if (timestamp_spool == NULL) {
+            fputs("logview: cannot create temporary timestamp storage.\n", stderr);
+            goto done;
+        }
+    }
+    for (index = 0; index < options->input_count; index++) {
+        if (!multi_load_head(&inputs[index], options, &scratch, field_filter,
+                             raw_regex, field_regex, exclude_regex,
+                             regex_field_name, stats,
+                             timestamp_spool, matched_count, rejected_count)) {
+            if (!inputs[index].diagnostic_emitted) {
+                if (inputs[index].reader.input_error)
+                    print_io_error("cannot read", inputs[index].path);
+                else
+                    fprintf(stderr, "logview: cannot process '%s'.\n", inputs[index].path);
+            }
+            goto done;
+        }
+    }
+    result = 0;
+    for (;;) {
+        size_t best = options->input_count;
+        LogEntry entry;
+        for (index = 0; index < options->input_count; index++) {
+            if (inputs[index].has_head &&
+                (best == options->input_count ||
+                 inputs[index].head_timestamp < inputs[best].head_timestamp ||
+                 (inputs[index].head_timestamp == inputs[best].head_timestamp &&
+                  index < best))) best = index;
+        }
+        if (best == options->input_count) break;
+        if (!options->stats_mode) {
+            if (!multi_parse_entry(options, inputs[best].format, &scratch,
+                                   inputs[best].head_data, inputs[best].head_length,
+                                   inputs[best].head_line_number,
+                                   inputs[best].head_byte_offset, &entry) ||
+                !output_write_source(&output, &entry, inputs[best].path)) {
+                print_io_error("cannot write", options->output_path != NULL ?
+                               options->output_path : "standard output");
+                result = 2;
+                goto done;
+            }
+        }
+        if (!multi_load_head(&inputs[best], options, &scratch, field_filter,
+                             raw_regex, field_regex, exclude_regex,
+                             regex_field_name, stats,
+                             timestamp_spool, matched_count, rejected_count)) {
+            if (!inputs[best].diagnostic_emitted) {
+                if (inputs[best].reader.input_error)
+                    print_io_error("cannot read", inputs[best].path);
+                else
+                    fprintf(stderr, "logview: cannot process '%s'.\n", inputs[best].path);
+            }
+            result = 2;
+            goto done;
+        }
+    }
+    for (index = 0; index < options->input_count; index++) {
+        MultiSpoolHeader header;
+        unsigned char *data;
+        LogEntry entry;
+        if (inputs[index].unknown_spool == NULL) continue;
+        rewind(inputs[index].unknown_spool);
+        while (fread(&header, sizeof(header), 1, inputs[index].unknown_spool) == 1) {
+            if (header.length > options->max_line_bytes) {
+                fputs("logview: invalid temporary record size.\n", stderr);
+                result = 2;
+                goto done;
+            }
+            data = (unsigned char *)malloc(header.length == 0 ? 1 : (size_t)header.length);
+            if (data == NULL || (header.length != 0 &&
+                fread(data, 1, (size_t)header.length, inputs[index].unknown_spool) != header.length)) {
+                free(data);
+                fputs("logview: cannot read temporary records without timestamps.\n", stderr);
+                result = 2;
+                goto done;
+            }
+            entry.raw.data = data;
+            entry.raw.length = (size_t)header.length;
+            entry.line_number = header.line_number;
+            entry.byte_offset = 0;
+            entry.field_count = 0;
+            entry.parse_ok = 0;
+            if (inputs[index].format == FORMAT_JSONL &&
+                !jsonl_parse(&entry, &scratch)) entry.field_count = 0;
+            else if (inputs[index].format == FORMAT_CUSTOM &&
+                     !parser_custom_line(options->custom_pattern, &entry)) entry.field_count = 0;
+            else if (inputs[index].format != FORMAT_RAW &&
+                     inputs[index].format != FORMAT_JSONL &&
+                     !parser_format_line(inputs[index].format, &entry)) entry.field_count = 0;
+            if (!options->stats_mode &&
+                !output_write_source(&output, &entry, inputs[index].path)) {
+                free(data);
+                print_io_error("cannot write", options->output_path != NULL ?
+                               options->output_path : "standard output");
+                result = 2;
+                goto done;
+            }
+            free(data);
+        }
+        if (ferror(inputs[index].unknown_spool)) {
+            fputs("logview: cannot read temporary records without timestamps.\n", stderr);
+            result = 2;
+            goto done;
+        }
+    }
+    if (output_ready && !output_finish(&output)) {
+        print_io_error("cannot finish output", options->output_path != NULL ?
+                       options->output_path : "standard output");
+        output_ready = 0;
+        result = 2;
+        goto done;
+    }
+    output_ready = 0;
+    if (timestamp_spool != NULL) {
+        int64_t epoch;
+        rewind(timestamp_spool);
+        while (fread(&epoch, sizeof(epoch), 1, timestamp_spool) == 1) {
+            if (!stats_timeline_add_epoch(stats, epoch)) {
+                fputs("logview: cannot update statistics timeline.\n", stderr);
+                result = 2;
+                goto done;
+            }
+        }
+        if (ferror(timestamp_spool)) {
+            fputs("logview: cannot read temporary timestamp storage.\n", stderr);
+            result = 2;
+            goto done;
+        }
+    }
+    if (options->stats_mode && !stats_print(stats, stdout)) {
+        print_io_error("cannot write statistics", "standard output");
+        result = 2;
+        goto done;
+    }
+    if (*rejected_count != 0)
+        fprintf(stderr, "logview: skipped %llu invalid or oversized record(s).\n",
+                (unsigned long long)*rejected_count);
+    result = *matched_count == 0 ? 1 : 0;
+done:
+    if (output_ready) output_finish(&output);
+    if (timestamp_spool != NULL) fclose(timestamp_spool);
+    for (index = 0; index < options->input_count; index++) {
+        if (inputs[index].unknown_spool != NULL) fclose(inputs[index].unknown_spool);
+        if (inputs[index].reader_ready) reader_destroy(&inputs[index].reader);
+        if (inputs[index].file != NULL) fclose(inputs[index].file);
+    }
+    if (scratch_ready) json_scratch_destroy(&scratch);
+    return result;
+}
+
 int main(int argc, char **argv)
 {
     Options options;
@@ -857,6 +1309,7 @@ int main(int argc, char **argv)
     int reader_ready = 0;
     Regex *raw_regex = NULL;
     Regex *field_regex = NULL;
+    Regex *exclude_regex = NULL;
     Filter *field_filter = NULL;
     LogStats stats;
     StatsTimestampConfig timestamp_config;
@@ -868,6 +1321,7 @@ int main(int argc, char **argv)
     uint64_t follow_line_base = 0;
     int result_code = 2;
     int flush_on_stop = 0;
+    unsigned int follow_read_error_retries = 0;
     FILE *bottom_spool = NULL;
     BottomRecord *bottom_records = NULL;
     size_t bottom_count = 0;
@@ -945,6 +1399,16 @@ int main(int argc, char **argv)
             return 3;
         }
     }
+    if (options.exclude_regex_argument != NULL) {
+        exclude_regex = regex_compile(options.exclude_regex_argument, regex_error,
+                                     sizeof(regex_error));
+        if (exclude_regex == NULL) {
+            fprintf(stderr, "logview: invalid --exclude-regex: %s\n", regex_error);
+            regex_free(raw_regex);
+            filter_free(field_filter);
+            return 3;
+        }
+    }
     if (regex_field_pattern != NULL) {
         field_regex = regex_compile(regex_field_pattern, regex_error,
                                     sizeof(regex_error));
@@ -952,6 +1416,7 @@ int main(int argc, char **argv)
             fprintf(stderr, "logview: invalid --regex-field pattern: %s\n",
                     regex_error);
             regex_free(raw_regex);
+            regex_free(exclude_regex);
             filter_free(field_filter);
             return 3;
         }
@@ -960,8 +1425,17 @@ int main(int argc, char **argv)
     if (options.save_profile_path != NULL && !save_query_profile(&options)) {
         regex_free(raw_regex);
         regex_free(field_regex);
+        regex_free(exclude_regex);
         filter_free(field_filter);
         return 2;
+    }
+
+    if (options.input_count > 1) {
+        result_code = run_multi_input(&options, field_filter, raw_regex,
+                                      field_regex, exclude_regex,
+                                      regex_field_name, &stats,
+                                      &matched_count, &rejected_count);
+        goto cleanup;
     }
 
     input = open_input_file(options.input_path, !options.tui_mode);
@@ -976,7 +1450,7 @@ int main(int argc, char **argv)
     reader_ready = 1;
     if (!output_init(&output, options.output_path, options.input_path,
                      options.export_set ? options.export_format : OUTPUT_TEXT,
-                     options.column_list, options.force_output,
+                     options.column_list, options.force_output, 0,
                      regex_error, sizeof(regex_error))) {
         fprintf(stderr, "logview: %s.\n", regex_error);
         output_ready = output.stream != NULL;
@@ -1018,7 +1492,8 @@ int main(int argc, char **argv)
         result_code = tui_run(&input, &reader, options.format,
                               options.custom_pattern, &scratch,
                               &field_filter, &raw_regex, &field_regex,
-                              regex_field_name, options.follow_mode,
+                              &exclude_regex, regex_field_name,
+                              options.follow_mode,
                               options.result_limit, options.bottom_limit,
                               options.context_before,
                               options.context_after,
@@ -1125,10 +1600,24 @@ int main(int argc, char **argv)
             }
         }
         if (read_result == READER_ERROR) {
+#ifdef ENODATA
+            if (options.follow_mode && errno == ENODATA &&
+                follow_read_error_retries < 3u) {
+                FollowResult recovery = follow_reopen_after_read_error(
+                    &input, options.input_path, &reader, &follow_line_base);
+                follow_read_error_retries++;
+                if (recovery == FOLLOW_READY) continue;
+                if (recovery == FOLLOW_STOPPED) {
+                    result_code = 0;
+                    goto cleanup;
+                }
+            }
+#endif
             print_io_error("cannot read", options.input_path);
             result_code = 2;
             goto cleanup;
         }
+        follow_read_error_retries = 0;
         if (read_result == READER_TOO_LONG) {
             rejected_count++;
             if (options.stats_mode && !stats_rejected(&stats)) {
@@ -1213,6 +1702,16 @@ int main(int argc, char **argv)
                 goto cleanup;
             }
             selected = regex_result == REGEX_MATCH;
+        }
+        if (selected && exclude_regex != NULL) {
+            RegexResult regex_result = regex_search(exclude_regex, line, line_length);
+            if (regex_result == REGEX_WORK_LIMIT) {
+                fprintf(stderr, "logview: exclude regex work limit exceeded at line %llu.\n",
+                        (unsigned long long)line_number);
+                result_code = 2;
+                goto cleanup;
+            }
+            if (regex_result == REGEX_MATCH) selected = 0;
         }
         if (selected && field_regex != NULL) {
             ByteSpan field_value;
@@ -1341,7 +1840,8 @@ int main(int argc, char **argv)
     output_ready = 0;
     if (options.stats_mode && stats.has_timestamp &&
         !accumulate_timeline(input, &reader, &options, &scratch, field_filter,
-                             raw_regex, field_regex, regex_field_name, &stats)) {
+                             raw_regex, field_regex, exclude_regex,
+                             regex_field_name, &stats)) {
         fputs("logview: cannot complete the statistics timeline pass.\n", stderr);
         result_code = 2;
         goto cleanup;
@@ -1377,6 +1877,7 @@ cleanup:
     free(last_record);
     regex_free(raw_regex);
     regex_free(field_regex);
+    regex_free(exclude_regex);
     filter_free(field_filter);
     return result_code;
 }

@@ -311,12 +311,104 @@ static int parse_syslog5424(LogEntry *entry)
     return 1;
 }
 
+static int cri_timestamp_shape(const unsigned char *data, size_t length)
+{
+    static const unsigned char month_days[] =
+        {31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31};
+    size_t position = 19;
+    size_t fraction_digits = 0;
+    size_t index;
+    unsigned zone_hours;
+    unsigned zone_minutes;
+    unsigned year;
+    unsigned month;
+    unsigned day;
+    unsigned hour;
+    unsigned minute;
+    unsigned second;
+    unsigned maximum_day;
+    if (length < 20 || data[4] != '-' || data[7] != '-' ||
+        (data[10] != 'T' && data[10] != 't') || data[13] != ':' ||
+        data[16] != ':') return 0;
+    for (index = 0; index < 19; index++) {
+        if (index != 4 && index != 7 && index != 10 && index != 13 &&
+            index != 16 && !is_digit(data[index])) return 0;
+    }
+    if (!parse_uint(data, 0, 4, 9999, &year) ||
+        !parse_uint(data, 5, 2, 12, &month) || month == 0 ||
+        !parse_uint(data, 8, 2, 31, &day) || day == 0 ||
+        !parse_uint(data, 11, 2, 23, &hour) ||
+        !parse_uint(data, 14, 2, 59, &minute) ||
+        !parse_uint(data, 17, 2, 60, &second)) return 0;
+    maximum_day = month_days[month - 1];
+    if (month == 2 && ((year % 4 == 0 && year % 100 != 0) || year % 400 == 0))
+        maximum_day++;
+    if (day > maximum_day) return 0;
+    if (position >= length || (data[position] != '.' && data[position] != 'Z' &&
+        data[position] != 'z' && data[position] != '+' && data[position] != '-')) return 0;
+    if (data[position] == '.') {
+        position++;
+        while (position < length && is_digit(data[position])) {
+            position++;
+            fraction_digits++;
+        }
+        if (fraction_digits == 0 || fraction_digits > 9) return 0;
+    }
+    if (position < length && (data[position] == 'Z' || data[position] == 'z'))
+        return position + 1 == length;
+    if (position + 6 != length || (data[position] != '+' && data[position] != '-') ||
+        !is_digit(data[position + 1]) || !is_digit(data[position + 2]) ||
+        data[position + 3] != ':' || !is_digit(data[position + 4]) ||
+        !is_digit(data[position + 5])) return 0;
+    zone_hours = (unsigned)(data[position + 1] - '0') * 10u +
+                 (unsigned)(data[position + 2] - '0');
+    zone_minutes = (unsigned)(data[position + 4] - '0') * 10u +
+                   (unsigned)(data[position + 5] - '0');
+    return zone_hours <= 23 && zone_minutes <= 59;
+}
+
+static int parse_cri(LogEntry *entry)
+{
+    const unsigned char *data = entry->raw.data;
+    size_t length = entry->raw.length;
+    size_t timestamp_length = 0;
+    size_t stream_start;
+    size_t stream_length;
+    size_t tag_start;
+    size_t tag_length;
+    size_t message_start;
+    size_t position = 0;
+    while (position < length && data[position] != ' ') position++;
+    timestamp_length = position;
+    if (!cri_timestamp_shape(data, timestamp_length)) return 0;
+    if (position >= length || data[position++] != ' ') return 0;
+    stream_start = position;
+    while (position < length && data[position] != ' ') position++;
+    stream_length = position - stream_start;
+    if (!((stream_length == 6 && memcmp(data + stream_start, "stdout", 6) == 0) ||
+          (stream_length == 6 && memcmp(data + stream_start, "stderr", 6) == 0))) return 0;
+    if (position >= length || data[position++] != ' ') return 0;
+    tag_start = position;
+    while (position < length && data[position] != ' ') position++;
+    tag_length = position - tag_start;
+    if (tag_length == 0 || position >= length || data[position++] != ' ') return 0;
+    message_start = position;
+    entry->field_count = 0;
+    if (!add_slice(entry, "timestamp", 0, timestamp_length) ||
+        !add_slice(entry, "stream", stream_start, stream_length) ||
+        !add_slice(entry, "tag", tag_start, tag_length) ||
+        !add_slice(entry, "message", message_start, length - message_start)) return 0;
+    entry->parse_ok = 1;
+    return 1;
+}
+
 InputFormat parser_format_from_name(const char *name)
 {
     if (strcmp(name, "raw") == 0) return FORMAT_RAW;
     if (strcmp(name, "jsonl") == 0) return FORMAT_JSONL;
     if (strcmp(name, "syslog3164") == 0) return FORMAT_SYSLOG3164;
     if (strcmp(name, "syslog5424") == 0) return FORMAT_SYSLOG5424;
+    if (strcmp(name, "cri") == 0) return FORMAT_CRI;
     if (strcmp(name, "apache-common") == 0) return FORMAT_APACHE_COMMON;
     if (strcmp(name, "apache-combined") == 0) return FORMAT_APACHE_COMBINED;
     if (strcmp(name, "nginx-combined") == 0) return FORMAT_NGINX_COMBINED;
@@ -335,6 +427,7 @@ int parser_format_line(InputFormat format, LogEntry *entry)
         return 1;
     case FORMAT_SYSLOG3164: return parse_syslog3164(entry);
     case FORMAT_SYSLOG5424: return parse_syslog5424(entry);
+    case FORMAT_CRI: return parse_cri(entry);
     case FORMAT_APACHE_COMMON: return parse_http(entry, 0);
     case FORMAT_APACHE_COMBINED:
     case FORMAT_NGINX_COMBINED: return parse_http(entry, 1);
@@ -345,7 +438,7 @@ int parser_format_line(InputFormat format, LogEntry *entry)
 InputFormat parser_detect_format(const unsigned char *const *lines,
                                  const size_t *lengths, size_t count)
 {
-    static const InputFormat candidates[] = {FORMAT_JSONL, FORMAT_SYSLOG5424,
+    static const InputFormat candidates[] = {FORMAT_JSONL, FORMAT_CRI, FORMAT_SYSLOG5424,
         FORMAT_SYSLOG3164, FORMAT_APACHE_COMMON, FORMAT_APACHE_COMBINED};
     unsigned scores[sizeof(candidates) / sizeof(candidates[0])] = {0};
     unsigned best = 0;

@@ -72,6 +72,7 @@ typedef struct {
     Filter **field_filter;
     Regex **raw_regex;
     Regex **field_regex;
+    Regex **exclude_regex;
     const char *regex_field_name;
     TuiRow rows[TUI_CACHE_ROWS];
     TuiCheckpoint *limited_rows;
@@ -244,7 +245,8 @@ static int parse_record(InputFormat format, const char *custom_pattern,
 
 static int record_selected(const LogEntry *entry, const unsigned char *line,
                            size_t length, Filter *filter, Regex *raw_regex,
-                           Regex *field_regex, const char *field_name)
+                           Regex *field_regex, Regex *exclude_regex,
+                           const char *field_name)
 {
     int selected = 1;
     if (filter != NULL) {
@@ -256,6 +258,11 @@ static int record_selected(const LogEntry *entry, const unsigned char *line,
         RegexResult result = regex_search(raw_regex, line, length);
         if (result == REGEX_WORK_LIMIT) return -1;
         selected = result == REGEX_MATCH;
+    }
+    if (selected && exclude_regex != NULL) {
+        RegexResult result = regex_search(exclude_regex, line, length);
+        if (result == REGEX_WORK_LIMIT) return -1;
+        if (result == REGEX_MATCH) selected = 0;
     }
     if (selected && field_regex != NULL) {
         ByteSpan value;
@@ -420,6 +427,7 @@ static int load_window(TuiState *state, uint64_t first, uint64_t count)
                               line, length, number, offset, &entry)) continue;
             selected = record_selected(&entry, line, length, *state->field_filter,
                                         *state->raw_regex, *state->field_regex,
+                                        *state->exclude_regex,
                                         state->regex_field_name);
             if (selected < 0) return 0;
             if (selected) {
@@ -492,6 +500,15 @@ static int row_matches(const TuiState *state, const TuiRow *row)
 {
     return row != NULL && state->search_regex != NULL &&
            regex_search(state->search_regex, row->text, row->length) == REGEX_MATCH;
+}
+
+static int is_bookmarked_line(const TuiState *state, uint64_t line_number)
+{
+    size_t index;
+    for (index = 0; index < state->bookmark_count; index++) {
+        if (state->bookmark_lines[index] == line_number) return 1;
+    }
+    return 0;
 }
 
 static void start_search_navigation(TuiState *state, int direction,
@@ -1099,6 +1116,7 @@ static int record_matches_state(TuiState *state, const unsigned char *line,
                       line, length, number, offset, entry)) return 0;
     return record_selected(entry, line, length, *state->field_filter,
                            *state->raw_regex, *state->field_regex,
+                           *state->exclude_regex,
                            state->regex_field_name);
 }
 
@@ -1695,8 +1713,11 @@ static void render(TuiState *state)
         }
         for (index = 0; index < context_rows_visible; index++) {
             TuiContextRow *row = &state->context_rows[context_start + (size_t)index];
+            int bookmarked = is_bookmarked_line(state, row->line_number);
             if (row->line_number == state->context_anchor_line) {
-                fputs("\033[7m", stdout);
+                fputs(bookmarked ? "\033[7;92m" : "\033[7m", stdout);
+            } else if (bookmarked) {
+                fputs("\033[92m", stdout);
             }
             print_record(row->line_number, row->text, row->length,
                          row->length == TUI_PREVIEW_BYTES, columns);
@@ -1711,7 +1732,14 @@ static void render(TuiState *state)
                 fputc('\n', stdout);
                 continue;
             }
-            if (sequence == state->cursor) fputs("\033[7m", stdout);
+            if (sequence == state->cursor &&
+                is_bookmarked_line(state, row->line_number)) {
+                fputs("\033[7;92m", stdout);
+            }
+            else if (sequence == state->cursor) fputs("\033[7m", stdout);
+            else if (is_bookmarked_line(state, row->line_number)) {
+                fputs("\033[92m", stdout);
+            }
             else if (row_matches(state, row)) fputs("\033[33m", stdout);
             else if (row->severity == TUI_LEVEL_ERROR) fputs("\033[31;1m", stdout);
             else if (row->severity == TUI_LEVEL_WARNING) fputs("\033[33m", stdout);
@@ -1904,6 +1932,7 @@ static int jump_to_line(TuiState *state)
                               line, length, number, offset, &entry)) continue;
             selected = record_selected(&entry, line, length, *state->field_filter,
                                        *state->raw_regex, *state->field_regex,
+                                       *state->exclude_regex,
                                        state->regex_field_name);
             if (selected < 0) {
                 snprintf(state->status, sizeof(state->status),
@@ -1978,7 +2007,7 @@ static int initialize_export_sink(OutputSink *sink, const char *requested_path,
             snprintf(error, error_capacity, "export path is too long");
             return 0;
         }
-        return output_init(sink, actual_path, input_path, format, NULL, 0,
+        return output_init(sink, actual_path, input_path, format, NULL, 0, 0,
                            error, error_capacity);
     }
     else {
@@ -2012,7 +2041,7 @@ static int initialize_export_sink(OutputSink *sink, const char *requested_path,
                 return 0;
             }
             errno = 0;
-            if (output_init(sink, actual_path, input_path, format, NULL, 0,
+            if (output_init(sink, actual_path, input_path, format, NULL, 0, 0,
                             error, error_capacity)) return 1;
             output_finish(sink);
             if (errno != EEXIST) return 0;
@@ -2079,7 +2108,8 @@ static int export_view(TuiState *state)
                               line, length, number, offset, &entry)) continue;
             selected = record_selected(&entry, line, length,
                                        *state->field_filter, *state->raw_regex,
-                                       *state->field_regex, state->regex_field_name);
+                                       *state->field_regex, *state->exclude_regex,
+                                       state->regex_field_name);
             if (selected < 0) {
                 snprintf(error, sizeof(error), "regex work limit exceeded at line %llu",
                          (unsigned long long)number);
@@ -2129,6 +2159,7 @@ static int export_view(TuiState *state)
 
 static int handle_key(TuiState *state, TerminalKey key, Filter **filter,
                       Regex **raw_regex, Regex **field_regex,
+                      Regex **exclude_regex,
                       const char *regex_field_name)
 {
     uint64_t oldest = oldest_sequence(state);
@@ -2207,7 +2238,8 @@ static int handle_key(TuiState *state, TerminalKey key, Filter **filter,
         }
         else if (key.character == 'C') {
             int changed = state->search_regex != NULL || *filter != NULL ||
-                          *raw_regex != NULL || *field_regex != NULL;
+                          *raw_regex != NULL || *field_regex != NULL ||
+                          *exclude_regex != NULL;
             state->search_navigation_active = 0;
             regex_free(state->search_regex);
             state->search_regex = NULL;
@@ -2218,6 +2250,8 @@ static int handle_key(TuiState *state, TerminalKey key, Filter **filter,
             *raw_regex = NULL;
             regex_free(*field_regex);
             *field_regex = NULL;
+            regex_free(*exclude_regex);
+            *exclude_regex = NULL;
             if (changed) {
                 if (!restart_scan(state)) return 0;
                 return 2;
@@ -2310,6 +2344,7 @@ static int wait_for_follow(TuiState *state, int *should_quit)
                                             state->search_navigation_active ? 0 : 250);
         int action = handle_key(state, key, state->field_filter,
                                 state->raw_regex, state->field_regex,
+                                state->exclude_regex,
                                 state->regex_field_name);
         int search_redraw;
         FollowResult follow_result;
@@ -2367,6 +2402,7 @@ static int wait_for_follow(TuiState *state, int *should_quit)
 int tui_run(FILE **input_file, LineReader *reader, InputFormat format,
             const char *custom_pattern, JsonScratch *scratch,
             Filter **field_filter, Regex **raw_regex, Regex **field_regex,
+            Regex **exclude_regex,
             const char *regex_field_name, int follow_enabled,
             size_t result_limit, int bottom_limit,
             size_t context_before, size_t context_after,
@@ -2412,6 +2448,7 @@ int tui_run(FILE **input_file, LineReader *reader, InputFormat format,
     state.field_filter = field_filter;
     state.raw_regex = raw_regex;
     state.field_regex = field_regex;
+    state.exclude_regex = exclude_regex;
     state.regex_field_name = regex_field_name;
     state.follow_enabled = follow_enabled;
     state.input_path = input_path;
@@ -2489,6 +2526,7 @@ int tui_run(FILE **input_file, LineReader *reader, InputFormat format,
                     state.terminal, state.search_navigation_active ? 0 : 250);
                 int action = handle_key(&state, key,
                                         field_filter, raw_regex, field_regex,
+                                        exclude_regex,
                                         regex_field_name);
                 int search_redraw;
                 if (action == 1) should_quit = 1;
@@ -2535,6 +2573,7 @@ int tui_run(FILE **input_file, LineReader *reader, InputFormat format,
                              number, offset, &entry)) {
                 selected = record_selected(&entry, line, length, *field_filter,
                                            *raw_regex, *field_regex,
+                                           *exclude_regex,
                                            regex_field_name);
             if (selected < 0) {
                     snprintf(state.status, sizeof(state.status), "Regex work limit exceeded at line %llu",
@@ -2568,6 +2607,7 @@ int tui_run(FILE **input_file, LineReader *reader, InputFormat format,
             TerminalKey key = terminal_read_key(state.terminal, 0);
             int action = handle_key(&state, key,
                                     field_filter, raw_regex, field_regex,
+                                    exclude_regex,
                                     regex_field_name);
             int search_redraw;
             if (action == 1) should_quit = 1;

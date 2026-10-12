@@ -64,6 +64,7 @@ int stats_set_timestamp_config(LogStats *stats,
                                const StatsTimestampConfig *config);
 int stats_selected(LogStats *stats, const LogEntry *entry);
 int stats_timeline_add(LogStats *stats, const LogEntry *entry);
+int stats_timeline_add_epoch(LogStats *stats, int64_t epoch);
 int stats_timestamp_epoch(ByteSpan timestamp, int64_t *epoch);
 int stats_timestamp_epoch_configured(ByteSpan timestamp,
                                      const StatsTimestampConfig *config,

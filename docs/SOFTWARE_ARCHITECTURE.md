@@ -1,6 +1,6 @@
 # Software Architecture
 
-**Status:** architecture for stable 1.0 and the implemented 1.1/1.2/1.3 development scope. The 1.3 changes pass the local Windows build and suite. Linux/macOS pseudo-terminal checks, Linux sanitizers, and package gates remain before publication. The behavioral contract is in [Technical Specification](TECHNICAL_SPECIFICATION.md), and validation evidence is in [Validation notes](VALIDATION.md).
+**Status:** architecture for stable 1.0 and the implemented 1.1–1.5 development scope. The Windows C99 build and CLI/sample suite pass for 1.5; Linux/macOS pseudo-terminal checks, Linux sanitizers, and package gates remain before publication. The behavioral contract is in [Technical Specification](TECHNICAL_SPECIFICATION.md), and validation evidence is in [Validation notes](VALIDATION.md).
 
 ## 1. Architectural goals
 
@@ -27,11 +27,12 @@ flowchart LR
 
 | Module | Responsibilities | Interface boundary |
 | --- | --- | --- |
-| `cli` / query profiles | Parse arguments, validate combinations and versioned query settings, choose mode and exit status | CLI arguments override the loaded profile; no profile file is written without an explicit save path. |
+| `cli` / query profiles | Parse arguments, validate combinations and versioned query settings, choose mode and exit status | CLI arguments override the loaded profile; multi-file batch runs enter the bounded k-way merge path. |
 | `line_reader` | Reusable bounded buffer, LF/CRLF handling, 64-bit offsets, final partial line, seek/reposition for follow | Emits transient `LineView`. |
 | `follow` | Poll file size and identity; wait for complete lines; reopen rotations and reset truncated inputs | Repositions the reader and preserves the last complete line number. |
 | `format_detect` | Bounded sample and confidence scoring | Chooses a preset or raw mode. |
 | `parser_syslog` | Distinct RFC 3164-like and RFC 5424 parsers | Fills normalized fields without changing raw data. |
+| `parser_cri` | Kubernetes CRI timestamp, stream, tag, and message parser | Preserves physical rows and exposes fragment tags without joining them. |
 | `parser_http` | Apache Common/Combined and NGINX Combined parsers | Fills access-specific fields. |
 | `parser_jsonl` | Bounded JSON objects, nested objects/arrays, and object arrays | Decodes strings into reusable scratch memory; exposes nested fields as dotted paths and leaf aliases. |
 | `parser_custom` | Compile and run placeholder patterns | Produces canonical aliases and named fields. |
@@ -39,7 +40,8 @@ flowchart LR
 | `regex_vm` | Iterative NFA matching and match spans | Reads byte slices; enforces state and work limits. |
 | `filter` | Compile expression grammar and evaluate predicates | Reads `LogEntry`, never mutates it. |
 | `stats` | Exact physical/parsed/rejected/selected and per-level counts; timestamp normalization | Fixed-bin timeline and bounded Space-Saving estimates; optional year/fixed-offset context interprets RFC 3164 date fields without altering record data. |
-| `export` | Stream raw text or CSV with escaping, UTF-8 replacement, and short-write handling | Consumes selected entries immediately; protects existing files by default. |
+| `export` | Stream raw text or CSV with escaping, UTF-8 replacement, source-file labels, and short-write handling | Consumes selected entries immediately; multi-file CSV always includes `source_file`; protects existing files by default. |
+| `multi_input` | Hold one current selected timestamped record per source, enforce source timestamp monotonicity, merge by epoch and stage unknown-time records | Heap use is bounded by 16 readers and their current records; temporary files hold unknown-time rows and stats epochs. |
 | `follow` | Poll, detect append/truncation/replacement, wait for complete records, and maintain reader state | Repositions the shared reader for the pipeline. |
 | `tui` | Input, bounded viewport, search, severity jumps, source-line bookmarks, configurable context, live follow, resize handling, dynamic filter edits, field summaries, histogram, help, clipped rendering | Retains 256 rows with 1 KiB previews; stores up to 32 session bookmarks in memory and navigation/context checkpoints in temporary files. Shares timestamp interpretation settings with batch statistics. |
 | `platform` | 64-bit seek/stat, sleep, file identity, terminal mode and input | POSIX and Win32 implementations with a common header. |

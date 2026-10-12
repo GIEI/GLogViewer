@@ -1,6 +1,6 @@
 # GLogViewer Product Roadmap
 
-**Status:** Version 1.0.0 is stable and 1.1.0 is the latest published release. Version 1.3.0 is implemented locally on Windows and awaits Linux/macOS, sanitizer, and package release gates. This roadmap preserves release history and defines the post-1.3 direction. See the [implementation plan](IMPLEMENTATION_PLAN.md) and [validation notes](VALIDATION.md).
+**Status:** Version 1.0.0 is stable and 1.1.0 is the latest published release. Version 1.5.0 CRI parsing is implemented on top of 1.4.0 multi-file batch analysis and passes the Windows CLI suite locally; Linux/macOS, sanitizer, and package release gates remain. This roadmap preserves release history and defines the next direction. See the [implementation plan](IMPLEMENTATION_PLAN.md) and [validation notes](VALIDATION.md).
 
 ## Product decision
 
@@ -30,7 +30,8 @@ The 1.2 scope was implemented locally and the 1.3 scope is now implemented and t
 | --- | --- | --- | --- |
 | **1.2 Structured inspection** | Read and summarize structured records without losing the original evidence. | Pretty-printed JSON; focused field-value statistics; navigable TUI histogram; explicit year and timezone for RFC 3164 timestamp analysis. | Implemented and locally tested on Windows; Linux/macOS PTY runs, Linux sanitizers, and release package checks remain before publication. |
 | **1.3 Investigation workflow** | Return to useful evidence and repeat a prior investigation. | TUI source-line bookmarks; versioned query profiles; configurable context before and after a match. | Windows build and CLI suite pass locally; POSIX PTY coverage, Linux sanitizers, and release package checks remain before publication. |
-| **1.4 Multi-file analysis** | Correlate events across related files in chronological order. | Multiple input files, source-file labels, timestamp ordering, and explicit handling of records without usable timestamps. | Cross-file ordering and tie behavior are documented and tested; bounded-memory behavior is measured; follow/rotation semantics are defined for multiple inputs; platform CI passes. |
+| **1.4 Multi-file analysis** | Correlate events across related files in chronological order. | Multiple input files, source-file labels, timestamp ordering, explicit handling of records without usable timestamps, aggregated statistics. | Ordering, tie, and missing-timestamp policies are documented and tested; multi-file follow is explicitly deferred; bounded-memory behavior is documented; platform CI passes. |
+| **1.5 Container log support** | Filter Kubernetes container logs without a custom pattern. | CRI parser, auto-detection, stream/tag/message fields, RFC 3339 Nano statistics. | Golden and malformed CRI fixtures pass; source lines remain unchanged; Windows, Linux, and macOS CI passes. |
 | **1.x Format expansion** | Inspect more operational data with the same local workflow. | Compressed input and additional container formats, selected by demand and dependency review. | Format fixtures, malformed-input behavior, portability, license/dependency review, and large-file performance are documented before inclusion. |
 
 Version 1.3 adds repeatable query profiles, source-line bookmarks, and adjustable context. Windows build and CLI verification are complete locally; Linux/macOS PTY runs, Linux sanitizers, and package checks remain required for the release gate. See the [implementation plan](IMPLEMENTATION_PLAN.md) and [release changelog](../CHANGELOG.md).
@@ -104,4 +105,4 @@ The 1.0 release requires:
 5. The README and manual describe the actual binary, installation, examples, known limits, and security behavior; documentation examples are executed in CI where practical.
 6. All written project content and all code comments satisfy the English-only policy.
 
-All gates are evidenced by CI run [38154893862](https://github.com/GIEI/GLogViewer/actions/runs/38154893862), the tagged release run [38155296731](https://github.com/GIEI/GLogViewer/actions/runs/38155296731), the benchmark report in [validation notes](VALIDATION.md), and the user's recorded platform testing. Native systemd/Windows event readers, multi-file merge, compression, multiline reconstruction, and automatic template discovery remain candidates for post-1.0 work unless separately approved and specified.
+All gates are evidenced by CI run [38154893862](https://github.com/GIEI/GLogViewer/actions/runs/38154893862), the tagged release run [38155296731](https://github.com/GIEI/GLogViewer/actions/runs/38155296731), the benchmark report in [validation notes](VALIDATION.md), and the user's recorded platform testing. Native systemd/Windows event readers, multi-file follow, compression, multiline reconstruction, and automatic template discovery remain candidates for later work.

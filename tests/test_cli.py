@@ -91,15 +91,16 @@ def main():
     require(help_result.returncode == 0 and
             all(option in help_result.stdout for option in (
                 b"--format", b"--pattern", b"--filter", b"--regex-field",
+                b"--exclude-regex",
                 b"--export", b"--stats", b"--follow", b"--tui",
                 b"--stats-field", b"--syslog-year", b"--syslog-timezone",
                 b"--profile", b"--save-profile", b"--profile-overwrite",
                 b"--context-before", b"--context-after",
-                b"--max-line-bytes", b"--version")),
+                b"--max-line-bytes", b"--version", b"cri")),
             "help should list the documented CLI features")
     version_result = run(binary, "--version")
     require(version_result.returncode == 0 and
-            version_result.stdout == b"logview 1.3.0\n",
+            version_result.stdout == b"logview 1.5.0\n",
             "version should print the program name and version")
     scratch_root = Path(__file__).resolve().parents[1] / "build" / "test-tmp"
     scratch_root.mkdir(parents=True, exist_ok=True)
@@ -129,6 +130,158 @@ def main():
         require(result.returncode == 0, "raw regex should find matching records")
         require(result.stdout == b"first timeout\nlast timeout\n",
                 "CRLF and unterminated final lines should be handled")
+        excluded = run(binary, str(raw_file), "--regex", "timeout",
+                       "--exclude-regex", "first")
+        require(excluded.returncode == 0 and
+                excluded.stdout == b"last timeout\n",
+                "exclude regex should remove matching raw records while retaining included matches")
+        excluded_only = run(binary, str(raw_file), "--exclude-regex", "timeout")
+        require(excluded_only.returncode == 0 and
+                excluded_only.stdout == b"second line\n",
+                "exclude regex should work without a positive regex")
+
+        cri_file = root / "container.cri.log"
+        cri_lines = (
+            b"2026-10-12T09:15:00.123456789Z stdout F application started\n"
+            b"2026-10-12T09:15:01.000000001Z stderr P database connection "
+            b"failed\n"
+            b"2026-10-12T09:15:01.000000002Z stderr F retry exhausted\n"
+        )
+        cri_file.write_bytes(cri_lines)
+        cri_filtered = run(binary, str(cri_file), "--format", "cri",
+                           "--filter", "stream=stderr", "--regex-field", "tag=^F")
+        require(cri_filtered.returncode == 0 and
+                cri_filtered.stdout == cri_lines.splitlines(keepends=True)[2],
+                "CRI parsing should expose stream and P/F tag fields for filtering")
+        cri_auto = run(binary, str(cri_file), "--format", "auto")
+        require(cri_auto.returncode == 0 and cri_auto.stdout == cri_lines and
+                cri_auto.stderr == b"",
+                "format auto-detection should recognize CRI timestamped records")
+        cri_stats = run(binary, str(cri_file), "--format", "cri", "--stats")
+        require(cri_stats.returncode == 0 and
+                b"Selected records: 3" in cri_stats.stdout and
+                b"Timestamped records: 3" in cri_stats.stdout and
+                b"Unknown timestamps: 0" in cri_stats.stdout,
+                "CRI timestamps should participate in the shared statistics timeline")
+        cri_whitespace = root / "container-whitespace.cri.log"
+        cri_whitespace.write_bytes(
+            b"2026-10-12T09:15:02Z stdout F  leading payload spaces\n")
+        cri_whitespace_result = run(binary, str(cri_whitespace), "--format", "cri",
+                                    "--regex-field", "message=^ leading")
+        require(cri_whitespace_result.returncode == 0 and
+                cri_whitespace_result.stdout == cri_whitespace.read_bytes(),
+                "CRI message parsing should preserve leading payload whitespace")
+        malformed_cri = root / "container-malformed.cri.log"
+        malformed_cri.write_bytes(
+            b"2026-02-30T09:15:00Z stdout F invalid date\n" +
+            b"2026-10-12T09:15:00Z other F invalid stream\n")
+        malformed_cri_result = run(binary, str(malformed_cri), "--format", "cri")
+        require(malformed_cri_result.returncode == 0 and
+                malformed_cri_result.stdout == malformed_cri.read_bytes() and
+                b"skipped 2 invalid or oversized record" in malformed_cri_result.stderr,
+                "malformed CRI timestamps and stream names should be reported as rejected")
+
+        multi_first = root / "multi-first.jsonl"
+        multi_second = root / "multi-second.jsonl"
+        multi_first.write_text(
+            '{"timestamp":"2026-01-01T00:00:01Z","message":"first-a"}\n'
+            '{"message":"unknown-a"}\n'
+            '{"timestamp":"2026-01-01T00:00:03Z","message":"tie-a"}\n',
+            encoding="utf-8")
+        multi_second.write_text(
+            '{"timestamp":"2026-01-01T00:00:02Z","message":"middle-b"}\n'
+            '{"message":"unknown-b"}\n'
+            '{"timestamp":"2026-01-01T00:00:03Z","message":"tie-b"}\n',
+            encoding="utf-8")
+        multi_result = run(binary, str(multi_first), str(multi_second),
+                           "--format", "jsonl")
+        expected_multi = (
+            "[{}:1] {{\"timestamp\":\"2026-01-01T00:00:01Z\",\"message\":\"first-a\"}}\n"
+            "[{}:1] {{\"timestamp\":\"2026-01-01T00:00:02Z\",\"message\":\"middle-b\"}}\n"
+            "[{}:3] {{\"timestamp\":\"2026-01-01T00:00:03Z\",\"message\":\"tie-a\"}}\n"
+            "[{}:3] {{\"timestamp\":\"2026-01-01T00:00:03Z\",\"message\":\"tie-b\"}}\n"
+            "[{}:2] {{\"message\":\"unknown-a\"}}\n"
+            "[{}:2] {{\"message\":\"unknown-b\"}}\n"
+        ).format(multi_first, multi_second, multi_first, multi_second,
+                 multi_first, multi_second).encode("utf-8")
+        require(multi_result.returncode == 0 and
+                multi_result.stdout == expected_multi and multi_result.stderr == b"",
+                "multiple files should merge by timestamp, break ties by argument order, "
+                "and append unknown timestamps in stable source order")
+        multi_filtered = run(binary, str(multi_first), str(multi_second),
+                             "--format", "jsonl", "--filter",
+                             "message=middle-b or message=tie-a")
+        require(multi_filtered.returncode == 0 and
+                multi_filtered.stdout == (
+                    "[{}:1] {{\"timestamp\":\"2026-01-01T00:00:02Z\",\"message\":\"middle-b\"}}\n"
+                    "[{}:3] {{\"timestamp\":\"2026-01-01T00:00:03Z\",\"message\":\"tie-a\"}}\n"
+                ).format(multi_second, multi_first).encode("utf-8"),
+                "multi-file merge should apply structured filters before emission")
+        multi_csv = root / "multi.csv"
+        multi_export = run(binary, str(multi_first), str(multi_second),
+                           "--format", "jsonl", "--export", "csv",
+                           "--output", str(multi_csv), "--columns", "message")
+        require(multi_export.returncode == 0,
+                "multi-file CSV export should succeed")
+        with multi_csv.open("r", encoding="utf-8", newline="") as stream:
+            multi_rows = list(csv.reader(stream))
+        require(multi_rows[0] == ["message", "source_file"] and
+                [row[1] for row in multi_rows[1:]] == [
+                    str(multi_first), str(multi_second), str(multi_first),
+                    str(multi_second), str(multi_first), str(multi_second)],
+                "multi-file CSV should always include the source file")
+        multi_stats = run(binary, str(multi_first), str(multi_second),
+                          "--format", "jsonl", "--stats")
+        require(multi_stats.returncode == 0 and b"Selected records: 6" in multi_stats.stdout and
+                b"Timestamped records: 4" in multi_stats.stdout and
+                b"Unknown timestamps: 2" in multi_stats.stdout and
+                multi_stats.stdout.startswith(b"Physical records:"),
+                "multi-file statistics should aggregate selected and timestamp counts")
+        unsorted_file = root / "multi-unsorted.jsonl"
+        unsorted_file.write_text(
+            '{"timestamp":"2026-01-01T00:00:02Z"}\n'
+            '{"timestamp":"2026-01-01T00:00:01Z"}\n', encoding="utf-8")
+        unsorted_result = run(binary, str(unsorted_file), str(multi_second),
+                              "--format", "jsonl")
+        require(unsorted_result.returncode == 2 and
+                b"not ordered by timestamp" in unsorted_result.stderr,
+                "multi-file analysis should reject a source with decreasing timestamps")
+        duplicate_result = run(binary, str(multi_first), str(multi_first),
+                               "--format", "jsonl")
+        require(duplicate_result.returncode == 3,
+                "multi-file analysis should reject duplicate input files")
+        duplicate_alias = run(binary, str(multi_first),
+                              os.path.relpath(multi_first, Path.cwd()),
+                              "--format", "jsonl")
+        require(duplicate_alias.returncode == 3 and
+                b"specified more than once" in duplicate_alias.stderr,
+                "multi-file analysis should reject alternate paths to the same file")
+        missing_multi = run(binary, str(multi_first), str(root / "missing.jsonl"),
+                            "--format", "jsonl")
+        require(missing_multi.returncode == 2 and
+                b"cannot open" in missing_multi.stderr,
+                "multi-file analysis should report input open failures")
+        mixed_raw = root / "multi-raw.log"
+        mixed_raw.write_text("legacy event without a parsed timestamp\n", encoding="utf-8")
+        mixed_result = run(binary, str(multi_first), str(mixed_raw), "--format", "auto")
+        require(mixed_result.returncode == 0 and
+                mixed_result.stdout.startswith(
+                    ("[{}:1] {{\"timestamp\":\"2026-01-01T00:00:01Z\"".format(
+                        multi_first)).encode("utf-8")) and
+                mixed_result.stdout.endswith(
+                    "[{}:1] legacy event without a parsed timestamp\n".format(
+                        mixed_raw).encode("utf-8")),
+                "auto format should detect JSON and raw formats independently per source")
+        malformed_file = root / "multi-malformed.jsonl"
+        malformed_file.write_text('{"timestamp":"2026-01-01T00:00:00Z"}\n'
+                                  '{broken json marker}\n', encoding="utf-8")
+        malformed_result = run(binary, str(malformed_file), str(multi_second),
+                                "--format", "jsonl", "--regex", "broken")
+        require(malformed_result.returncode == 0 and
+                malformed_result.stdout == "[{}:2] {{broken json marker}}\n".format(
+                    malformed_file).encode("utf-8") and
+                b"skipped 1 invalid or oversized record" in malformed_result.stderr,
+                "malformed selected records should remain available with source labels")
 
         if os.name != "nt":
             long_path_directory = root
@@ -240,12 +393,13 @@ def main():
                 os.replace(reopen_file, reopen_old)
                 time.sleep(0.4)
                 reopen_file.write_bytes(b"reopened generation\n")
-                time.sleep(0.6)
+                time.sleep(1.2)
             finally:
                 reopen_process.terminate()
                 reopen_output, reopen_error = reopen_process.communicate(timeout=5)
             require(reopen_output == b"reopened generation\n" and reopen_error == b"",
-                    "follow should recover when a rotated path is temporarily missing")
+                    "follow should recover when a rotated path is temporarily missing; "
+                    "output={!r}, stderr={!r}".format(reopen_output, reopen_error))
 
             flush_file = root / "follow-flush.log"
             flush_file.write_bytes(b"")
@@ -301,12 +455,14 @@ def main():
         profile_saved = run(
             binary, str(json_file), "--format", "jsonl", "--filter", "level=ERROR",
             "--regex-field", "message=timeout", "--context-before", "0",
-            "--context-after", "2", "--save-profile", str(profile_path),
+            "--context-after", "2", "--exclude-regex", "connection",
+            "--save-profile", str(profile_path),
         )
         require(profile_saved.returncode == 0 and
-                b'"message":"connection timeout"' in profile_saved.stdout and
+                b'"message":"connection timeout"' not in profile_saved.stdout and
+                b'"msg":"timeout"' in profile_saved.stdout and
                 profile_path.read_text(encoding="utf-8").startswith("GLOGVIEW_PROFILE 1\n"),
-                "saving a versioned query profile should preserve current filters")
+                "saving a versioned query profile should preserve include and exclude regex filters")
         profile_loaded = run(binary, str(json_file), "--profile", str(profile_path))
         require(profile_loaded.returncode == 0 and
                 profile_loaded.stdout == profile_saved.stdout,
@@ -463,6 +619,14 @@ def main():
                 b"  000: 1\n" in configured_syslog_stats.stdout and
                 b"  255: 2\n" in configured_syslog_stats.stdout,
                 "RFC 3164 timestamps should use the configured year and UTC offset")
+        timezone_profile = root / "timezone.glogprofile"
+        timezone_profile_saved = run(
+            binary, str(syslog_timeline_file), "--format", "syslog3164",
+            "--syslog-year", "2025", "--syslog-timezone", "+23:59",
+            "--save-profile", str(timezone_profile))
+        require(timezone_profile_saved.returncode == 0 and
+                b"syslog_timezone=+23:59\n" in timezone_profile.read_bytes(),
+                "query profiles should preserve the maximum valid timezone offset")
         utc_syslog_stats = run(
             binary, str(syslog_timeline_file), "--format", "syslog3164",
             "--syslog-year", "2025", "--stats")
@@ -835,8 +999,9 @@ def main():
                 context_process.wait(timeout=3)
                 require(context_process.returncode == 0 and
                         b"Bookmarked source line 3" in context_output[bookmark_start:] and
+                        b"\033[7;92m       3" in context_output[bookmark_start:] and
                         b"Context size: 5 before, 5 after" in context_output[bookmark_start:],
-                        "TUI should bookmark source lines and adjust context around the selection")
+                        "TUI should render bookmarked lines in light green and adjust context size")
             finally:
                 if context_process.poll() is None:
                     context_process.kill()
@@ -1312,6 +1477,8 @@ def main():
                 os.write(histogram_master, b"h")
                 histogram_read_until(b"Time histogram", 3)
                 histogram_read_until(b"Bucket 000 | 1 records", 3)
+                histogram_read_until(
+                    b"Left/Right: bucket  Enter: jump  Esc or h: records", 3)
                 histogram_screen = bytes(histogram_output[
                     histogram_output.rfind(b"\x1b[H\x1b[2J"):])
                 require(b"UTC time: oldest" in histogram_screen and
@@ -1332,9 +1499,10 @@ def main():
                 os.write(histogram_master, b"q")
                 histogram_tui.wait(timeout=5)
                 require(histogram_tui.returncode == 0 and
-                        b"Unknown timestamps: 1" in histogram_output and
+                        b"3 timestamped | 1 unknown" in histogram_output and
                         b'3 {"timestamp":"2025-01-01T00:01:00Z"' in histogram_output,
-                        "TUI histogram should navigate to the first selected record in a bucket")
+                        "TUI histogram should navigate to the first selected record in a bucket; "
+                        "output={!r}".format(bytes(histogram_output[-2000:])))
             finally:
                 if histogram_tui.poll() is None:
                     histogram_tui.kill()
@@ -1374,12 +1542,19 @@ def main():
                 os.write(syslog_histogram_master, b"\r")
                 syslog_histogram_read_until(
                     b"Jumped to first record in bucket 000", 2, jump_start)
+                selected_syslog_row = b"\x1b[7m       1 Jun 4 15:16:01 host app: first"
+                syslog_histogram_read_until(selected_syslog_row, 2, jump_start)
                 os.write(syslog_histogram_master, b"q")
                 syslog_histogram_tui.wait(timeout=4)
                 require(syslog_histogram_tui.returncode == 0 and
                         b"3 timestamped | 0 unknown" in syslog_histogram_output and
-                        b"Jun  4 15:16:01" in syslog_histogram_output,
-                        "configured RFC 3164 timestamps should populate and navigate the TUI histogram")
+                        selected_syslog_row in syslog_histogram_output[jump_start:] and
+                        b"Jumped to first record in bucket 000" in
+                        syslog_histogram_output[jump_start:],
+                        "configured RFC 3164 timestamps should populate and navigate the TUI histogram; "
+                        "returncode={!r}, output={!r}".format(
+                            syslog_histogram_tui.returncode,
+                            bytes(syslog_histogram_output[-2000:])))
             finally:
                 if syslog_histogram_tui.poll() is None:
                     syslog_histogram_tui.kill()
@@ -1442,16 +1617,19 @@ def main():
                 nested_read_until(b"Search: (none)", 2, restore_output_start)
                 os.write(nested_master, b"q")
                 nested_tui.wait(timeout=5)
+                nested_screen = bytes(nested_tui_output).replace(b"\r\n", b"\n")
                 require(nested_tui.returncode == 0 and
-                        b"selected: 1" in nested_tui_output and
-                        b"829-648-0859x1216" in nested_tui_output and
-                        b'"employee": {\n' in nested_tui_output and
-                        b'"id": "E1"' in nested_tui_output and
-                        b'"display": "literal { brace, } brace, and \\"quoted\\" text"' in nested_tui_output and
-                        b"formatted JSON" in nested_tui_output and
-                        b"Record zoom | source line 2" in nested_tui_output and
-                        b"zoom-end-marker" in nested_tui_output,
-                        "TUI should display the multiline JSON record matching a nested phone field")
+                        b"selected: 1" in nested_screen and
+                        b"829-648-0859x1216" in nested_screen and
+                        b'"employee": {\n' in nested_screen and
+                        b'"id": "E1"' in nested_screen and
+                        b'"display": "literal { brace, } brace, and \\"quoted\\" text"' in nested_screen and
+                        b"formatted JSON" in nested_screen and
+                        b"Record zoom | source line 2" in nested_screen and
+                        b"zoom-end-marker" in nested_screen,
+                        "TUI should display the multiline JSON record matching a nested phone field; "
+                        "returncode={!r}, output={!r}".format(
+                            nested_tui.returncode, nested_screen[-4000:]))
             finally:
                 if nested_tui.poll() is None:
                     nested_tui.kill()

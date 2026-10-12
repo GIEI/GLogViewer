@@ -1,6 +1,6 @@
 # GLogViewer Implementation Plan
 
-**Status:** 1.2 and 1.3 implementations are complete locally on Windows. The full Windows CLI suite passes, including the available sample corpus. Linux/macOS pseudo-terminal runs, Linux sanitizer checks, and release packaging remain publication gates. All project content and code comments follow the English-only policy in [AGENTS.md](../AGENTS.md).
+**Status:** The 1.5.0 development scope, including Kubernetes CRI parsing and raw-line regex exclusion, is implemented locally on Windows. The full Windows CLI suite passes across all 16 available sample files; Windows packaging checks pass. Linux/macOS pseudo-terminal runs, Linux sanitizer checks, and cross-platform package validation remain publication gates. All project content and code comments follow the English-only policy in [AGENTS.md](../AGENTS.md).
 
 ## Product goals
 
@@ -78,9 +78,41 @@ Version 1.1 provides bounded streaming, JSON and text formats, named parsers, fi
 - The merge remains bounded in memory; any per-file buffering limit is documented and tested.
 - Multi-file follow is not enabled until append and rotation semantics pass platform-specific integration tests.
 
+### Implementation record
+
+- Accept up to 16 input files in one batch invocation. A single selected format applies to every file; `--format auto` detects each file independently. Directories, standard input, duplicate files, TUI, follow, and result-window modes are rejected for multi-file runs.
+- Merge supported timestamped records with one selected head record per source. Each source must be nondecreasing by parseable timestamp; a decrease stops the run with a source path and line diagnostic. Equal timestamps follow command-line argument order, then source-line order.
+- Emit records without a usable timestamp after all timestamped records, preserving argument order and source-line order. Temporary files keep those records off the heap. Output labels identify source path and source line; CSV always includes a `source_file` column.
+- Aggregate `--stats` across all input files. Timestamp values are staged in temporary storage and bucketed after the complete selected timestamp range is known.
+- Add coverage for timestamp interleaving, deterministic ties, missing timestamps, multi-file CSV labels, statistics, duplicate paths, and descending timestamps. Windows C99 build and full CLI/sample suite pass locally; POSIX, sanitizer, and package gates remain.
+
+## Release 1.5: Kubernetes CRI logs
+
+### Scope
+
+- Add a dependency-free parser for the CRI line form `<RFC3339Nano timestamp> <stdout|stderr> <tag> <message>`.
+- Expose `timestamp`, `stream`, `tag`, and `message` fields for filters, CSV export, and statistics.
+- Add CRI to format auto-detection without changing original source lines.
+- Keep `P` and `F` fragments as individual source records in this release; automatic multiline reconstruction remains a separately specified feature.
+- Add `--exclude-regex` for dropping noisy raw records while retaining the existing include regex and field-filter workflow.
+
+### Acceptance criteria
+
+- Valid timestamps with fractional seconds and UTC offsets are parsed; calendar, stream, and timestamp-shape errors are rejected and reported.
+- Filters can select stream and tag values; original records remain byte-for-byte available to output.
+- Auto-detection and statistics recognize representative CRI files.
+- Exclusion patterns apply consistently to batch output, exports, statistics, follow, TUI navigation, and saved query profiles.
+- Existing parsers and single-/multi-file workflows pass the Windows, Linux, and macOS test matrix.
+
+### Implementation record
+
+- Implement the `cri` preset and include it in `auto` format scoring.
+- Add fixtures for fractional timestamps, `stdout`/`stderr`, `P`/`F`, field filtering, timeline stats, invalid dates, and invalid stream names.
+- Windows build, full CLI/sample suite, and package checks pass locally; POSIX, sanitizer, and cross-platform package gates remain before publication.
+
 ## Later candidates
 
-Compressed input, CRI/container formats, multi-line event reconstruction, and persistent indexes are candidates rather than commitments. Evaluate each against user demand, portability, input safety, licensing, implementation cost, and measured benefit. A persistent index must detect file replacement or modification and recover without returning stale results. Automatic log-template discovery remains research work and should not delay the core local investigation workflow.
+Compressed input, multi-line event reconstruction, and persistent indexes are candidates rather than commitments. Evaluate each against user demand, portability, input safety, licensing, implementation cost, and measured benefit. A persistent index must detect file replacement or modification and recover without returning stale results. Automatic log-template discovery remains research work and should not delay the core local investigation workflow.
 
 ## Engineering and release rules
 

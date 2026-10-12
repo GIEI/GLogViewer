@@ -111,12 +111,26 @@ static int same_file(const char *left, const char *right)
 #endif
 }
 
+int output_paths_same_file(const char *left, const char *right)
+{
+    if (left == NULL || right == NULL) return 0;
+    return same_file(left, right);
+}
+
 static int parse_columns(OutputSink *sink, const char *columns,
-                         char *error, size_t error_capacity)
+                         int include_source_file, char *error,
+                         size_t error_capacity)
 {
     static const char *defaults[] = {"line_number", "timestamp", "level", "message", "raw"};
     size_t index;
     if (columns == NULL) {
+        if (include_source_file) {
+            strcpy(sink->columns[0], "source_file");
+            for (index = 0; index < sizeof(defaults) / sizeof(defaults[0]); index++)
+                strcpy(sink->columns[index + 1], defaults[index]);
+            sink->column_count = sizeof(defaults) / sizeof(defaults[0]) + 1;
+            return 1;
+        }
         for (index = 0; index < sizeof(defaults) / sizeof(defaults[0]); index++) {
             strcpy(sink->columns[index], defaults[index]);
         }
@@ -152,6 +166,19 @@ static int parse_columns(OutputSink *sink, const char *columns,
     if (sink->column_count == 0) {
         snprintf(error, error_capacity, "CSV column list cannot be empty");
         return 0;
+    }
+    if (include_source_file) {
+        size_t prior;
+        int found = 0;
+        for (prior = 0; prior < sink->column_count; prior++)
+            if (strcmp(sink->columns[prior], "source_file") == 0) found = 1;
+        if (!found) {
+            if (sink->column_count >= LOGVIEW_MAX_COLUMNS) {
+                snprintf(error, error_capacity, "CSV column list leaves no room for source_file");
+                return 0;
+            }
+            strcpy(sink->columns[sink->column_count++], "source_file");
+        }
     }
     return 1;
 }
@@ -217,11 +244,13 @@ static int write_header(OutputSink *sink)
 
 int output_init(OutputSink *sink, const char *path, const char *input_path,
                 OutputFormat format, const char *columns, int force,
+                int include_source_file,
                 char *error, size_t error_capacity)
 {
     memset(sink, 0, sizeof(*sink));
     sink->format = format;
-    if (format == OUTPUT_CSV && !parse_columns(sink, columns, error, error_capacity)) return 0;
+    if (format == OUTPUT_CSV && !parse_columns(sink, columns, include_source_file,
+                                               error, error_capacity)) return 0;
     if (path == NULL) {
         if (!allocate_text_buffer(sink, error, error_capacity)) return 0;
         sink->stream = stdout;
@@ -270,7 +299,8 @@ int output_init(OutputSink *sink, const char *path, const char *input_path,
     return 1;
 }
 
-static int write_entry_csv(OutputSink *sink, const LogEntry *entry)
+static int write_entry_csv(OutputSink *sink, const LogEntry *entry,
+                           const char *source_path)
 {
     size_t index;
     for (index = 0; index < sink->column_count; index++) {
@@ -282,6 +312,11 @@ static int write_entry_csv(OutputSink *sink, const LogEntry *entry)
             int count = snprintf(number, sizeof(number), "%llu", (unsigned long long)entry->line_number);
             value.data = (const unsigned char *)number;
             value.length = count < 0 ? 0 : (size_t)count;
+        } else if (strcmp(column, "source_file") == 0) {
+            if (source_path != NULL) {
+                value.data = (const unsigned char *)source_path;
+                value.length = strlen(source_path);
+            }
         } else if (strcmp(column, "raw") == 0) {
             value = entry->raw;
         } else {
@@ -293,12 +328,30 @@ static int write_entry_csv(OutputSink *sink, const LogEntry *entry)
     return fwrite("\r\n", 1, 2, sink->stream) == 2;
 }
 
-int output_write(OutputSink *sink, const LogEntry *entry)
+int output_write_source(OutputSink *sink, const LogEntry *entry,
+                        const char *source_path)
 {
     size_t required;
     if (sink->stream == NULL) return 0;
-    if (sink->format == OUTPUT_CSV) return write_entry_csv(sink, entry);
+    if (sink->format == OUTPUT_CSV) return write_entry_csv(sink, entry, source_path);
     if (sink->text_buffer == NULL || entry->raw.length == (size_t)-1) return 0;
+    if (source_path != NULL) {
+        const unsigned char *path = (const unsigned char *)source_path;
+        size_t path_length = strlen(source_path);
+        size_t path_index;
+        if (!flush_text_buffer(sink) || fputc('[', sink->stream) == EOF) return 0;
+        for (path_index = 0; path_index < path_length; path_index++) {
+            unsigned char byte = path[path_index];
+            if (byte < 0x20 || byte == 0x7f) {
+                if (fprintf(sink->stream, "\\x%02X", (unsigned)byte) < 0) return 0;
+            } else if (fputc(byte, sink->stream) == EOF) return 0;
+        }
+        if (fprintf(sink->stream, ":%llu] ",
+                    (unsigned long long)entry->line_number) < 0) return 0;
+        if (entry->raw.length != 0 && fwrite(entry->raw.data, 1,
+            entry->raw.length, sink->stream) != entry->raw.length) return 0;
+        return fputc('\n', sink->stream) != EOF;
+    }
     required = entry->raw.length + 1;
     if (required > sink->text_buffer_capacity) {
         if (!flush_text_buffer(sink)) return 0;
@@ -315,6 +368,11 @@ int output_write(OutputSink *sink, const LogEntry *entry)
     sink->text_buffer[sink->text_buffer_length + entry->raw.length] = '\n';
     sink->text_buffer_length += required;
     return 1;
+}
+
+int output_write(OutputSink *sink, const LogEntry *entry)
+{
+    return output_write_source(sink, entry, NULL);
 }
 
 int output_flush(OutputSink *sink)
