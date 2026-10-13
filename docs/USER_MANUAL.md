@@ -213,7 +213,7 @@ logview app.log --format jsonl --tui
 | Page Up/Page Down | Move one screen. |
 | Home/End | Go to the first/last selected row in the scanned file. |
 | `J` | Enter a one-based source line number. If that line is filtered out, go to the next selected record; if none follows, go to the last selected record. |
-| `/` | Enter a regex search. Press Enter to jump to its first match. |
+| `/` | Enter a regex search or a Boolean expression of quoted literal terms. Press Enter to jump to its first match. |
 | Enter / Shift+Enter | Go to the next/previous search match. |
 | Esc during search navigation | Cancel a long search. Progress appears in the status line. |
 | `n` / `N` | Also go to the next/previous search match. |
@@ -241,6 +241,8 @@ Set context size at launch with `--context-before N` and `--context-after N` (0â
 With `--top N` or `--bottom N`, the TUI shows only the first or last N selected records. Source-line jump (`J`) is disabled in this limited view because the displayed sequence does not represent the complete file.
 
 The `v` field summary scans the complete current filtered result set and is available after the initial scan; it does not include the separate interactive search string. The `h` histogram requires a complete scan of a seekable file without `--top` or `--bottom`; it makes two additional streaming passes and is unavailable during follow. If the selected record is JSON, `z` displays a pretty-printed version when the formatted output is within the 16 MiB record limit. Malformed JSON, formatting errors, or larger formatted output fall back to the source text. Filtering, search, and export continue to use original input data.
+
+The `/` prompt accepts the built-in regex syntax or a Boolean search expression. In Boolean mode, write literal terms in double quotes and combine them with `AND`, `OR`, `NOT`, and parentheses. Operators are case-insensitive; precedence is `NOT`, then `AND`, then `OR`. For example, `/"66.249" AND "20/May"` matches rows containing both literal strings in either order. `/"timeout" AND NOT "retry"` excludes rows containing `retry`, and `/("ERROR" OR "FATAL") AND "database"` combines alternatives. Terms are case-sensitive. An unquoted `AND`, `OR`, or `NOT` selects Boolean mode; otherwise input remains a regular expression. Escape regex metacharacters when searching for them literally, such as `\[` or `\.`.
 
 ## 9. Exit codes and troubleshooting
 

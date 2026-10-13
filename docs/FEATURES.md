@@ -1,6 +1,6 @@
 # Feature Catalogue and Product Positioning
 
-**Status:** Version 1.5.0 is the current stable release. It adds Kubernetes CRI log parsing to the 1.4.0 multi-file batch features. The project owner verified the test suite on Windows, Linux, and macOS. Exact behavior and known limits are specified in [Technical Specification](TECHNICAL_SPECIFICATION.md).
+**Status:** Version 1.5.0 is the current stable release. Boolean quoted-literal search is in development for 1.6.0. The project owner verified the 1.5.0 test suite on Windows, Linux, and macOS. Exact behavior and known limits are specified in [Technical Specification](TECHNICAL_SPECIFICATION.md).
 
 ## 1. Users and jobs
 
@@ -28,7 +28,7 @@ Common application fields worth preserving are timestamp, severity, message, ser
 | Internal regex on raw line or field | Must | Find text and highlight evidence | Supported subset; iterative NFA execution. |
 | Raw-line regex exclusion | Implemented | Remove known noise while retaining other matches | `--exclude-regex` works with batch, TUI, follow, exports, statistics, and query profiles. |
 | CLI batch mode | Must | Use in scripts and incident runbooks | Stable exit codes and diagnostics. |
-| TUI browse/search/help | Must | Explore filtered records interactively | Bounded viewport cache, full-scan checkpoints, regex search, source-line jumps and bookmarks, severity jumps, configurable context, formatted JSON zoom, field-value summary, and navigable time histogram. |
+| TUI browse/search/help | Must | Explore filtered records interactively | Bounded viewport cache, full-scan checkpoints, regex and Boolean quoted-literal search, source-line jumps and bookmarks, severity jumps, configurable context, formatted JSON zoom, field-value summary, and navigable time histogram. Boolean query search is in development for 1.6.0. |
 | Query profiles | Must | Repeat investigations without rebuilding command options | Versioned portable settings shared by batch CLI and TUI, with explicit overwrite and validation. |
 | Follow mode | Must | Watch a live application file | Append/truncate/rotation behavior documented. |
 | Text and CSV export | Must | Share a filtered evidence set | Streamed output with fixed CSV columns. |

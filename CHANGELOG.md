@@ -1,5 +1,16 @@
 # GLogViewer Changelog
 
+## 1.6.0 (development)
+
+Adds Boolean literal search to the TUI.
+
+### Included
+
+- Allow quoted literal search terms combined with `AND`, `OR`, `NOT`, and parentheses.
+- Define operator precedence as `NOT`, then `AND`, then `OR`; retain regex search when no unquoted `AND` or `OR` is present.
+- Bound the query parser with fixed term, node, and nesting limits.
+- Document regex escaping for literal punctuation and add a PTY regression check for a two-term `AND` search.
+
 ## 1.5.0 — 2026-10-12
 
 Adds native parsing for Kubernetes CRI container log files.

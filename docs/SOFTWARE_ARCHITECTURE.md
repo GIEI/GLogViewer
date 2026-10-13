@@ -38,6 +38,7 @@ flowchart LR
 | `parser_custom` | Compile and run placeholder patterns | Produces canonical aliases and named fields. |
 | `regex_compile` | Lex and parse supported regex into AST; reject invalid syntax | Emits immutable NFA program and capture metadata. |
 | `regex_vm` | Iterative NFA matching and match spans | Reads byte slices; enforces state and work limits. |
+| `tui_search` | Compile regex or Boolean quoted-literal query; match search rows | Fixed-size AST, bounded term count and depth; Boolean operators short-circuit. |
 | `filter` | Compile expression grammar and evaluate predicates | Reads `LogEntry`, never mutates it. |
 | `stats` | Exact physical/parsed/rejected/selected and per-level counts; timestamp normalization | Fixed-bin timeline and bounded Space-Saving estimates; optional year/fixed-offset context interprets RFC 3164 date fields without altering record data. |
 | `export` | Stream raw text or CSV with escaping, UTF-8 replacement, source-file labels, and short-write handling | Consumes selected entries immediately; multi-file CSV always includes `source_file`; protects existing files by default. |
@@ -63,7 +64,7 @@ Makefile
 build.bat
 ```
 
-The current implementation uses `include/logview.h`, `src/main.c`, `src/reader.c`, `src/reader.h`, `src/follow.c`, `src/follow.h`, `src/terminal.c`, `src/terminal.h`, `src/tui.c`, `src/tui.h`, `src/jsonl.c`, `src/jsonl.h`, `src/json_pretty.c`, `src/json_pretty.h`, `src/parsers.c`, `src/parsers.h`, `src/filter.c`, `src/filter.h`, `src/output.c`, `src/output.h`, `src/stats.c`, `src/stats.h`, `src/regex.c`, `src/regex.h`, and `tests/test_cli.py`.
+The current implementation uses `include/logview.h`, `src/main.c`, `src/reader.c`, `src/reader.h`, `src/follow.c`, `src/follow.h`, `src/terminal.c`, `src/terminal.h`, `src/tui.c`, `src/tui.h`, `src/search_query.c`, `src/search_query.h`, `src/jsonl.c`, `src/jsonl.h`, `src/json_pretty.c`, `src/json_pretty.h`, `src/parsers.c`, `src/parsers.h`, `src/filter.c`, `src/filter.h`, `src/output.c`, `src/output.h`, `src/stats.c`, `src/stats.h`, `src/regex.c`, `src/regex.h`, and `tests/test_cli.py`.
 
 ## 3. Data contracts and lifetime
 

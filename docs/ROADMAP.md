@@ -24,7 +24,7 @@ The numbers identify capability milestones, not calendar dates. A stage is compl
 
 ## Recent milestones and post-1.3 roadmap
 
-Versions 1.2 through 1.5 are complete. The next milestones prioritize additional format support. Each release is complete only when its exit gate passes on Windows, Linux, and macOS.
+Versions 1.2 through 1.5 are complete. Version 1.6 is developing Boolean TUI search; later milestones will evaluate additional formats. Each release is complete only when its exit gate passes on Windows, Linux, and macOS.
 
 | Release | User-visible outcome | Main additions | Exit gate |
 | --- | --- | --- | --- |
@@ -32,6 +32,7 @@ Versions 1.2 through 1.5 are complete. The next milestones prioritize additional
 | **1.3 Investigation workflow** | Return to useful evidence and repeat a prior investigation. | TUI source-line bookmarks; versioned query profiles; configurable context before and after a match. | Included in 1.5.0; owner reports Windows, Linux, and macOS test suites pass. |
 | **1.4 Multi-file analysis** | Correlate events across related files in chronological order. | Multiple input files, source-file labels, timestamp ordering, explicit handling of records without usable timestamps, aggregated statistics. | Ordering, tie, and missing-timestamp policies are documented and tested; multi-file follow is explicitly deferred; bounded-memory behavior is documented; platform CI passes. |
 | **1.5 Container log support** | Filter Kubernetes container logs without a custom pattern. | CRI parser, auto-detection, stream/tag/message fields, RFC 3339 Nano statistics. | Released as 1.5.0; owner reports the full test suite passes on Windows, Linux, and macOS. |
+| **1.6 Boolean TUI search** | Combine exact literal terms without escaping regex punctuation. | Quoted terms, `AND`/`OR`/`NOT`, parentheses, documented precedence, regex compatibility. | Parser bounds, precedence, navigation, highlighting, and export behavior pass on Windows, Linux, and macOS. |
 | **1.x Format expansion** | Inspect more operational data with the same local workflow. | Compressed input and additional container formats, selected by demand and dependency review. | Format fixtures, malformed-input behavior, portability, license/dependency review, and large-file performance are documented before inclusion. |
 
 Version 1.5.0 is the current stable release and includes repeatable query profiles, source-line bookmarks, adjustable context, multi-file analysis, and Kubernetes CRI support. See the [implementation plan](IMPLEMENTATION_PLAN.md) and [release changelog](../CHANGELOG.md).

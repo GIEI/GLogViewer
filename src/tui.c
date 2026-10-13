@@ -7,6 +7,7 @@
 #include "follow.h"
 #include "json_pretty.h"
 #include "output.h"
+#include "search_query.h"
 #include "stats.h"
 #include "terminal.h"
 
@@ -98,7 +99,7 @@ typedef struct {
     uint64_t bookmark_lines[TUI_BOOKMARK_CAPACITY];
     uint64_t bookmark_sequences[TUI_BOOKMARK_CAPACITY];
     size_t bookmark_count;
-    Regex *search_regex;
+    SearchQuery *search_query;
     char search_text[TUI_QUERY_BYTES];
     char status[160];
     int scanning;
@@ -498,8 +499,8 @@ static int load_context(TuiState *state)
 
 static int row_matches(const TuiState *state, const TuiRow *row)
 {
-    return row != NULL && state->search_regex != NULL &&
-           regex_search(state->search_regex, row->text, row->length) == REGEX_MATCH;
+    return row != NULL && state->search_query != NULL &&
+           search_query_match(state->search_query, row->text, row->length) == REGEX_MATCH;
 }
 
 static int is_bookmarked_line(const TuiState *state, uint64_t line_number)
@@ -521,7 +522,7 @@ static void start_search_navigation(TuiState *state, int direction,
                  "Search navigation will start when scanning completes");
         return;
     }
-    if (state->search_regex == NULL || state->total_rows == 0) {
+    if (state->search_query == NULL || state->total_rows == 0) {
         state->search_navigation_active = 0;
         return;
     }
@@ -1689,7 +1690,8 @@ static void render(TuiState *state)
               "  C: clear search and all filters\n"
               "  x: export filtered/search results (use .csv for CSV)\n"
               "  ?: close help  q: quit\n\n"
-              "Search and filtering use the built-in regular expression syntax.\n", stdout);
+              "Search: regex or quoted literals with AND, OR, NOT, and parentheses.\n"
+              "Example: \"66.249\" AND \"20/May\" matches in either order.\n", stdout);
         for (index = 0; index < rows - 10; index++) fputc('\n', stdout);
     } else if (state->context_visible) {
         printf("\n  Context around source line %llu\n\n",
@@ -1820,17 +1822,17 @@ static int prompt_search(TuiState *state)
 {
     char text[TUI_QUERY_BYTES];
     char error[160];
-    Regex *replacement = NULL;
+    SearchQuery *replacement = NULL;
     if (!terminal_read_line(state->terminal, "/", text, sizeof(text))) return 0;
     if (text[0] != '\0') {
-        replacement = regex_compile(text, error, sizeof(error));
+        replacement = search_query_compile(text, error, sizeof(error));
         if (replacement == NULL) {
             snprintf(state->status, sizeof(state->status), "Invalid search: %.130s", error);
             return 0;
         }
     }
-    regex_free(state->search_regex);
-    state->search_regex = replacement;
+    search_query_free(state->search_query);
+    state->search_query = replacement;
     strcpy(state->search_text, text);
     state->status[0] = '\0';
     if (replacement != NULL) start_search_navigation(state, 1, 1);
@@ -2116,11 +2118,11 @@ static int export_view(TuiState *state)
                 success = 0;
                 break;
             }
-            if (selected && state->search_regex != NULL) {
+            if (selected && state->search_query != NULL) {
                 size_t search_length = length < TUI_PREVIEW_BYTES ?
                                        length : TUI_PREVIEW_BYTES;
-                RegexResult search_result = regex_search(state->search_regex,
-                                                         line, search_length);
+                RegexResult search_result = search_query_match(state->search_query,
+                                                               line, search_length);
                 if (search_result == REGEX_WORK_LIMIT) {
                     snprintf(error, sizeof(error), "search work limit exceeded at line %llu",
                              (unsigned long long)number);
@@ -2237,12 +2239,12 @@ static int handle_key(TuiState *state, TerminalKey key, Filter **filter,
             if (action == 1) return 1;
         }
         else if (key.character == 'C') {
-            int changed = state->search_regex != NULL || *filter != NULL ||
+            int changed = state->search_query != NULL || *filter != NULL ||
                           *raw_regex != NULL || *field_regex != NULL ||
                           *exclude_regex != NULL;
             state->search_navigation_active = 0;
-            regex_free(state->search_regex);
-            state->search_regex = NULL;
+            search_query_free(state->search_query);
+            state->search_query = NULL;
             state->search_text[0] = '\0';
             filter_free(*filter);
             *filter = NULL;
@@ -2517,7 +2519,7 @@ int tui_run(FILE **input_file, LineReader *reader, InputFormat format,
             }
             state.scanning = 0;
             snprintf(state.status, sizeof(state.status), "Scan complete");
-            if (state.search_regex != NULL) {
+            if (state.search_query != NULL) {
                 start_search_navigation(&state, 1, 1);
             }
             render(&state);
@@ -2559,7 +2561,7 @@ int tui_run(FILE **input_file, LineReader *reader, InputFormat format,
             state.scanning = 0;
             render(&state);
             terminal_leave(state.terminal);
-            regex_free(state.search_regex);
+            search_query_free(state.search_query);
             fclose(state.index_file);
             fclose(state.physical_index_file);
             free(state.limited_rows);
@@ -2581,7 +2583,7 @@ int tui_run(FILE **input_file, LineReader *reader, InputFormat format,
                     state.scanning = 0;
                     render(&state);
                     terminal_leave(state.terminal);
-                    regex_free(state.search_regex);
+                    search_query_free(state.search_query);
                     fclose(state.index_file);
                     fclose(state.physical_index_file);
                     free(state.limited_rows);
@@ -2594,7 +2596,7 @@ int tui_run(FILE **input_file, LineReader *reader, InputFormat format,
                     state.scanning = 0;
                     render(&state);
                     terminal_leave(state.terminal);
-                    regex_free(state.search_regex);
+                    search_query_free(state.search_query);
                     fclose(state.index_file);
                     fclose(state.physical_index_file);
                     free(state.limited_rows);
@@ -2623,7 +2625,7 @@ int tui_run(FILE **input_file, LineReader *reader, InputFormat format,
         }
     }
     terminal_leave(state.terminal);
-    regex_free(state.search_regex);
+    search_query_free(state.search_query);
     fclose(state.index_file);
     fclose(state.physical_index_file);
     free(state.limited_rows);

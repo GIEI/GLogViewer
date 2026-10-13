@@ -1,6 +1,6 @@
 # GLogViewer Implementation Plan
 
-**Status:** Version 1.5.0 is complete. The project owner verified the full test suite on Windows, Linux, and macOS. The tag-triggered release workflow runs Linux sanitizers and cross-platform package checks before publishing. All project content and code comments follow the English-only policy in [AGENTS.md](../AGENTS.md).
+**Status:** Version 1.5.0 is complete; 1.6.0 Boolean TUI search is in development. The project owner verified the 1.5.0 test suite on Windows, Linux, and macOS. The tag-triggered release workflow runs Linux sanitizers and cross-platform package checks before publishing. All project content and code comments follow the English-only policy in [AGENTS.md](../AGENTS.md).
 
 ## Product goals
 
@@ -109,6 +109,21 @@ Version 1.1 provides bounded streaming, JSON and text formats, named parsers, fi
 - Implement the `cri` preset and include it in `auto` format scoring.
 - Add fixtures for fractional timestamps, `stdout`/`stderr`, `P`/`F`, field filtering, timeline stats, invalid dates, and invalid stream names.
 - Windows, Linux, and macOS test suites pass according to the project owner. Tagged CI performs the release sanitizer and package checks before publication.
+
+## Release 1.6: Boolean TUI search
+
+### Scope
+
+- Search quoted literal terms with `AND`, `OR`, `NOT`, and parentheses while preserving regex search for ordinary regex input.
+- Define and document operator precedence and case sensitivity; keep evaluation bounded by fixed parser limits.
+- Explain regex metacharacter escaping with log-search examples.
+
+### Acceptance criteria
+
+- Boolean terms match literally, including punctuation that would otherwise be a regex operator; an unquoted logical operator selects Boolean mode.
+- `AND`, `OR`, `NOT`, grouping, and precedence behave consistently in navigation, highlighting, and export.
+- Invalid expressions produce a recoverable TUI error and leave the previous search intact.
+- Windows, Linux, and macOS builds and applicable TUI checks pass.
 
 ## Later candidates
 

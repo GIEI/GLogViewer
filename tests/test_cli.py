@@ -1121,6 +1121,59 @@ def main():
                 os.close(navigation_master)
                 os.close(navigation_slave)
 
+            boolean_search_file = root / "tui-boolean-search.log"
+            boolean_search_file.write_text(
+                "66.249 client request 20/May/2015:20\n"
+                "66.249 client request 21/May/2015:20\n"
+                "other client request 20/May/2015:20\n"
+                "20/May/2015:20 request from 66.249\n",
+                encoding="ascii",
+            )
+            boolean_master, boolean_slave = pty.openpty()
+            fcntl.ioctl(boolean_slave, termios.TIOCSWINSZ,
+                        struct.pack("HHHH", 24, 100, 0, 0))
+            boolean_process = subprocess.Popen(
+                [str(binary), str(boolean_search_file), "--tui"],
+                stdin=boolean_slave,
+                stdout=boolean_slave,
+                stderr=boolean_slave,
+                close_fds=True,
+            )
+            boolean_output = bytearray()
+            try:
+                def boolean_read_until(needle, timeout):
+                    deadline = time.monotonic() + timeout
+                    while needle not in boolean_output and \
+                            boolean_process.poll() is None and time.monotonic() < deadline:
+                        ready, _, _ = select.select([boolean_master], [], [], 0.1)
+                        if ready:
+                            try:
+                                boolean_output.extend(os.read(boolean_master, 65536))
+                            except OSError:
+                                break
+
+                boolean_read_until(b"Scan complete", 3)
+                os.write(boolean_master, b"/")
+                boolean_read_until(b"\033[24;1H\033[2K/", 2)
+                os.write(boolean_master, b'"66.249" AND "20/May"\n')
+                boolean_read_until(b'Search: "66.249" AND "20/May"', 3)
+                os.write(boolean_master, b"\n")
+                boolean_read_until(
+                    b"\033[7m       4 20/May/2015:20 request from 66.249", 3)
+                os.write(boolean_master, b"q")
+                boolean_process.wait(timeout=3)
+                require(boolean_process.returncode == 0 and
+                        b'Search: "66.249" AND "20/May"' in boolean_output and
+                        b'1 66.249 client request 20/May/2015:20' in boolean_output and
+                        b"\033[7m       4 20/May/2015:20 request from 66.249" in boolean_output,
+                        "TUI Boolean AND search should find both terms in either order and navigate between matches")
+            finally:
+                if boolean_process.poll() is None:
+                    boolean_process.kill()
+                    boolean_process.wait(timeout=5)
+                os.close(boolean_master)
+                os.close(boolean_slave)
+
             (root / "tui_1.jsonl").write_text("existing export 1\n", encoding="utf-8")
             (root / "tui_2.jsonl").write_text("existing export 2\n", encoding="utf-8")
             tui_export = root / "tui_3.jsonl"
