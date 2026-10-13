@@ -1,6 +1,6 @@
 # GLogViewer Implementation Plan
 
-**Status:** Version 1.5.0 is complete; 1.6.0 Boolean TUI search is in development. The project owner verified the 1.5.0 test suite on Windows, Linux, and macOS. The tag-triggered release workflow runs Linux sanitizers and cross-platform package checks before publishing. All project content and code comments follow the English-only policy in [AGENTS.md](../AGENTS.md).
+**Status:** Version 1.6.0 is complete. The tagged workflow runs the full Windows, Linux, and macOS test matrix, Linux sanitizers, and cross-platform package checks. All project content and code comments follow the English-only policy in [AGENTS.md](../AGENTS.md).
 
 ## Product goals
 

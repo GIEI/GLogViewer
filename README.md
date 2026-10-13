@@ -1,6 +1,6 @@
 # GLogViewer
 
-GLogViewer is a cross-platform, dependency-free C99 tool for exploring large structured log files from a command line or terminal interface. The executable is `logview`. The batch CLI supports raw and JSON Lines input, syslog RFC 3164/5424, Kubernetes CRI container logs, Apache/Nginx access logs, custom patterns, format detection, compound and range filters, regex, reusable query profiles, record sampling, text/CSV export, exact record/level counts, timestamp timelines, estimated frequent field values, and follow mode with truncation and rotation detection. The TUI supports bounded result windows, viewport navigation, regex and Boolean quoted-literal search, source-line jumps and bookmarks, error/warning jumps, configurable physical context, formatted JSON zoom, field-value summaries, time histograms, filter edits, export, and live follow. Boolean TUI search is under development for 1.6.0; the latest stable release remains [1.5.0](https://github.com/GIEI/GLogViewer/releases/tag/v1.5.0), which adds native CRI parsing and auto-detection. See the [release notes](CHANGELOG.md), [user manual](docs/USER_MANUAL.md), and [known limits](docs/TECHNICAL_SPECIFICATION.md).
+GLogViewer is a cross-platform, dependency-free C99 tool for exploring large structured log files from a command line or terminal interface. The executable is `logview`. The batch CLI supports raw and JSON Lines input, syslog RFC 3164/5424, Kubernetes CRI container logs, Apache/Nginx access logs, custom patterns, format detection, compound and range filters, regex, reusable query profiles, record sampling, text/CSV export, exact record/level counts, timestamp timelines, estimated frequent field values, and follow mode with truncation and rotation detection. The TUI supports bounded result windows, viewport navigation, regex and Boolean quoted-literal search, source-line jumps and bookmarks, error/warning jumps, configurable physical context, formatted JSON zoom, field-value summaries, time histograms, filter edits, export, and live follow. Version 1.6.0 adds Boolean TUI search with quoted literal terms and `AND`, `OR`, `NOT`, and parentheses. The latest stable release is [1.6.0](https://github.com/GIEI/GLogViewer/releases/tag/v1.6.0). See the [release notes](CHANGELOG.md), [user manual](docs/USER_MANUAL.md), and [known limits](docs/TECHNICAL_SPECIFICATION.md).
 
 ## Features
 
@@ -79,8 +79,8 @@ logview --tui app.log
 
 ## Documents
 
-- [Product roadmap](docs/ROADMAP.md): release history and planned post-1.5 milestones.
-- [Implementation plan](docs/IMPLEMENTATION_PLAN.md): completed 1.2 through 1.5 scope, 1.6 Boolean-search development, validation status, and later acceptance criteria.
+- [Product roadmap](docs/ROADMAP.md): release history and planned post-1.6 milestones.
+- [Implementation plan](docs/IMPLEMENTATION_PLAN.md): completed 1.2 through 1.6 scope, validation status, and later acceptance criteria.
 - [Feature catalogue](docs/FEATURES.md): scope, user workflows, competing tools, and priorities.
 - [Technical specification](docs/TECHNICAL_SPECIFICATION.md): syntax, data contracts, limits, performance targets, and acceptance tests.
 - [Software architecture](docs/SOFTWARE_ARCHITECTURE.md): modules, data flow, platform boundaries, and implementation sequence.
@@ -95,6 +95,6 @@ All repository content and every source comment must be written in English. See 
 
 ## Status and license
 
-Status: stable version `1.5.0`. The project owner verified Windows, Linux, and macOS test suites. The tagged release workflow runs platform, sanitizer, packaging, and provenance checks before publishing. The existing [LICENSE](LICENSE) governs the repository.
+Status: stable version `1.6.0`. The tagged release workflow runs platform, sanitizer, packaging, and provenance checks before publishing. The existing [LICENSE](LICENSE) governs the repository.
 
 See the [release process](docs/RELEASE_PROCESS.md) for the tag-based packaging workflow.

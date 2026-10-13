@@ -1,6 +1,10 @@
 # Validation Notes
 
-**Status:** release validation evidence, 2026-10-12. The project owner reports the full test suite passing on Windows, Linux, and macOS. Tag-triggered CI remains responsible for clean release builds, package checks, Linux sanitizers, and artifact attestations. Exploratory sample comparisons are observations, not release benchmarks unless explicitly identified below as the formal 1 GiB benchmark.
+**Status:** release validation evidence, 2026-10-13. The project owner reports the 1.5.0 test suite passing on Windows, Linux, and macOS. The 1.6.0 tag-triggered workflow is the release gate for the Boolean search changes and runs clean platform builds, package checks, Linux sanitizers, and artifact attestations. Exploratory sample comparisons are observations, not release benchmarks unless explicitly identified below as the formal 1 GiB benchmark.
+
+## Version 1.6.0 release validation
+
+The release workflow runs the complete test suite on Windows, Linux, and macOS, including the POSIX TUI Boolean-search checks on Linux and macOS. It also runs AddressSanitizer and UndefinedBehaviorSanitizer, validates release archives, checks the binary version against the tag, generates SHA-256 checksums and artifact attestations, and publishes only after required jobs succeed.
 
 ## Version 1.5.0 release validation
 

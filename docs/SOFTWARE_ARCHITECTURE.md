@@ -1,6 +1,6 @@
 # Software Architecture
 
-**Status:** architecture for stable versions 1.0 through 1.5.0. The project owner verified the test suite on Windows, Linux, and macOS. The behavioral contract is in [Technical Specification](TECHNICAL_SPECIFICATION.md), and validation evidence is in [Validation notes](VALIDATION.md).
+**Status:** architecture for stable versions 1.0 through 1.6.0. The 1.6 release adds a bounded Boolean query parser for TUI search. The behavioral contract is in [Technical Specification](TECHNICAL_SPECIFICATION.md), and validation evidence is in [Validation notes](VALIDATION.md).
 
 ## 1. Architectural goals
 

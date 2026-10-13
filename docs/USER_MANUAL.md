@@ -1,6 +1,6 @@
 # User Manual
 
-**Status:** GLogViewer 1.5.0 is the stable release, adding native Kubernetes CRI parsing to the 1.4.0 multi-file workflow. The project owner verified the test suite on Windows, Linux, and macOS. See the [release process](RELEASE_PROCESS.md).
+**Status:** GLogViewer 1.6.0 is the stable release, adding Boolean literal search to the TUI. See the [release process](RELEASE_PROCESS.md).
 
 ## 1. What the tool will do
 

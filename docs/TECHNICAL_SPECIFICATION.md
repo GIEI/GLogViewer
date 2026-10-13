@@ -1,7 +1,7 @@
 # Technical Specification
 
 **Project:** GLogViewer (`logview`)  
-**Status:** Version 1.5.0 is stable and adds CRI parsing to the 1.4 multi-file workflow. The project owner verified the test suite on Windows, Linux, and macOS. See [validation notes](VALIDATION.md).
+**Status:** Version 1.6.0 is stable and adds Boolean TUI search to the supported regex workflow. See [validation notes](VALIDATION.md).
 **Language:** C99; all repository content is English.
 
 ## 1. Purpose and scope

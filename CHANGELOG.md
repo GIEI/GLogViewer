@@ -1,15 +1,20 @@
 # GLogViewer Changelog
 
-## 1.6.0 (development)
+## 1.6.0 — 2026-10-13
 
 Adds Boolean literal search to the TUI.
 
 ### Included
 
 - Allow quoted literal search terms combined with `AND`, `OR`, `NOT`, and parentheses.
-- Define operator precedence as `NOT`, then `AND`, then `OR`; retain regex search when no unquoted `AND` or `OR` is present.
+- Define operator precedence as `NOT`, then `AND`, then `OR`; retain regex search when no standalone logical operator is present.
 - Bound the query parser with fixed term, node, and nesting limits.
 - Document regex escaping for literal punctuation and add a PTY regression check for a two-term `AND` search.
+- Keep regex searches such as `not-present` in regex mode by recognizing Boolean operators only at query-token boundaries.
+
+### Validation status
+
+- The project owner reports passing Windows, Linux, and macOS test suites for the 1.5.0 baseline. The 1.6.0 tag-triggered workflow runs the full platform matrix, sanitizer checks, package validation, and release publication gate.
 
 ## 1.5.0 — 2026-10-12
 
