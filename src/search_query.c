@@ -71,6 +71,12 @@ static int is_word_character(unsigned char value)
            (value >= '0' && value <= '9') || value == '_';
 }
 
+static int is_query_boundary(unsigned char value)
+{
+    return value == '\0' || value == ' ' || value == '\t' ||
+           value == '(' || value == ')' || value == '"';
+}
+
 static int keyword_at(const SearchParser *parser, const char *keyword)
 {
     size_t length = strlen(keyword);
@@ -126,7 +132,11 @@ static int contains_logical_operator(const char *text)
             while (position < length &&
                    is_word_character((unsigned char)text[position])) position++;
             token_length = position - start;
-            if ((token_length == 3 &&
+            if (is_query_boundary(start == 0 ? '\0' :
+                                  (unsigned char)text[start - 1]) &&
+                is_query_boundary(position == length ? '\0' :
+                                  (unsigned char)text[position]) &&
+                ((token_length == 3 &&
                  ((toupper((unsigned char)text[start]) == 'A' &&
                    toupper((unsigned char)text[start + 1]) == 'N' &&
                    toupper((unsigned char)text[start + 2]) == 'D') ||
@@ -135,7 +145,7 @@ static int contains_logical_operator(const char *text)
                    toupper((unsigned char)text[start + 2]) == 'T'))) ||
                 (token_length == 2 &&
                  toupper((unsigned char)text[start]) == 'O' &&
-                 toupper((unsigned char)text[start + 1]) == 'R')) return 1;
+                 toupper((unsigned char)text[start + 1]) == 'R'))) return 1;
             continue;
         }
         position++;
