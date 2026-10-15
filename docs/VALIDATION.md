@@ -1,6 +1,12 @@
 # Validation Notes
 
-**Status:** release validation evidence, 2026-10-13. The project owner reports the 1.5.0 test suite passing on Windows, Linux, and macOS. The 1.6.0 tag-triggered workflow is the release gate for the Boolean search changes and runs clean platform builds, package checks, Linux sanitizers, and artifact attestations. Exploratory sample comparisons are observations, not release benchmarks unless explicitly identified below as the formal 1 GiB benchmark.
+**Status:** release validation evidence, 2026-10-15. The 1.7.0 tag-triggered workflow is the release gate for Apache Error parsing and runs clean CLI/TUI builds and tests on Windows, Linux, and macOS, package checks, Linux sanitizers, and artifact attestations. The optional GUI is verified on Windows only and is excluded from release archives. Exploratory sample comparisons are observations, not release benchmarks unless explicitly identified below as the formal 1 GiB benchmark.
+
+## Version 1.7.0 pre-release validation
+
+- Windows MSVC CLI build and full CLI suite pass locally; the suite scanned all 16 regular files in `SAMPLES`.
+- Windows GUI build succeeds with SDL3 3.4.18. A dummy-video capture during a live scan of `Linux_1GB.syslog` shows the bottom status panel, timers, record counts, and cancel control fully inside the window.
+- The tagged workflow remains responsible for Windows, Linux, and macOS CLI/TUI gates, Linux sanitizers, release packaging, and provenance. Linux/macOS GUI builds and interactive GUI checks are not release gates for this preview.
 
 ## Version 1.6.0 release validation
 

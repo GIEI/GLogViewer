@@ -1,5 +1,23 @@
 # GLogViewer Changelog
 
+## 1.7.0 — 2026-10-15
+
+Adds Apache Error log support and an optional desktop GUI preview.
+
+### Included
+
+- Add the `apache-error` parser and automatic detection for Apache Error records, including timestamps, levels, modules, and client addresses when present.
+- Include Apache Error timestamps in statistics; timestamps without a timezone are interpreted as UTC.
+- Add an optional Nuklear/SDL3 desktop GUI with incremental scanning, search and filters, result navigation, record details, analysis, export, follow, timing, and a bottom-anchored status panel.
+- Support UTF-8 output paths from the Windows GUI and locate common extracted SDL3 development packages when building on Windows.
+- Keep CLI and TUI builds independent of SDL3. The published platform archives contain the CLI/TUI binary; build the GUI from source with SDL3.
+
+### Validation status
+
+- The Windows CLI build and complete sample suite pass locally across all 16 regular files in `SAMPLES`.
+- The Windows GUI builds with SDL3 3.4.18. A live scan capture of the 1 GiB syslog sample confirms the status and cancel controls remain inside the window.
+- The tagged workflow validates CLI/TUI builds and packages on Windows, Linux, and macOS, and runs Linux sanitizers. GUI builds have not yet been verified on Linux or macOS and are not included in platform archives.
+
 ## 1.6.0 — 2026-10-13
 
 Adds Boolean literal search to the TUI.

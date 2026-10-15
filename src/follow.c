@@ -7,11 +7,13 @@
 #include <errno.h>
 #include <signal.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <sys/stat.h>
 
 #ifdef _WIN32
 #include <io.h>
 #include <windows.h>
+#include <wchar.h>
 typedef struct _stat64 FollowStat;
 #else
 #include <time.h>
@@ -20,6 +22,38 @@ typedef struct stat FollowStat;
 #endif
 
 extern volatile sig_atomic_t logview_stop_requested;
+
+#ifdef _WIN32
+static wchar_t *wide_path_from_utf8(const char *path)
+{
+    int length = MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS,
+                                     path, -1, NULL, 0);
+    wchar_t *wide_path;
+    if (length <= 0) return NULL;
+    wide_path = (wchar_t *)malloc((size_t)length * sizeof(*wide_path));
+    if (wide_path == NULL) return NULL;
+    if (MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS,
+                            path, -1, wide_path, length) <= 0) {
+        free(wide_path);
+        return NULL;
+    }
+    return wide_path;
+}
+#endif
+
+static FILE *open_follow_path(const char *path)
+{
+#ifdef _WIN32
+    wchar_t *wide_path = wide_path_from_utf8(path);
+    FILE *file;
+    if (wide_path == NULL) return NULL;
+    file = _wfopen(wide_path, L"rb");
+    free(wide_path);
+    return file;
+#else
+    return fopen(path, "rb");
+#endif
+}
 
 static int file_status(FILE *file, FollowStat *status)
 {
@@ -33,7 +67,12 @@ static int file_status(FILE *file, FollowStat *status)
 static int path_status(const char *path, FollowStat *status)
 {
 #ifdef _WIN32
-    return _stat64(path, status) == 0;
+    wchar_t *wide_path = wide_path_from_utf8(path);
+    int result;
+    if (wide_path == NULL) return 0;
+    result = _wstat64(wide_path, status) == 0;
+    free(wide_path);
+    return result;
 #else
     return stat(path, status) == 0;
 #endif
@@ -53,9 +92,14 @@ static int path_matches_open_file(FILE *file, const char *path)
     BY_HANDLE_FILE_INFORMATION path_info;
     int matches;
     if (current_handle == INVALID_HANDLE_VALUE) return 0;
-    path_handle = CreateFileA(path, FILE_READ_ATTRIBUTES,
+    {
+        wchar_t *wide_path = wide_path_from_utf8(path);
+        if (wide_path == NULL) return 0;
+        path_handle = CreateFileW(wide_path, FILE_READ_ATTRIBUTES,
                               FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
                               NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
+        free(wide_path);
+    }
     if (path_handle == INVALID_HANDLE_VALUE) return 0;
     matches = GetFileInformationByHandle(current_handle, &current_info) &&
               GetFileInformationByHandle(path_handle, &path_info) &&
@@ -121,7 +165,7 @@ FollowResult follow_wait(FILE **input, const char *path, LineReader *reader,
                                            *line_number_base)) return FOLLOW_ERROR;
                     return FOLLOW_READY;
                 }
-                FILE *replacement = fopen(path, "rb");
+                FILE *replacement = open_follow_path(path);
                 if (replacement != NULL) {
                     reader->file = replacement;
                     if (!reader_reposition(reader, 0, 0)) {
@@ -171,7 +215,7 @@ FollowResult follow_poll(FILE **input, const char *path, LineReader *reader,
             return FOLLOW_READY;
         }
         {
-            FILE *replacement = fopen(path, "rb");
+            FILE *replacement = open_follow_path(path);
             if (replacement == NULL) return FOLLOW_IDLE;
             reader->file = replacement;
             if (!reader_reposition(reader, 0, 0)) {
@@ -212,7 +256,7 @@ FollowResult follow_reopen_after_read_error(FILE **input, const char *path,
         uint64_t resume_line_number = 0;
         int same_file = 0;
         if (logview_stop_requested) return FOLLOW_STOPPED;
-        replacement = fopen(path, "rb");
+        replacement = open_follow_path(path);
         if (replacement == NULL) {
             pause_poll();
             continue;

@@ -1,6 +1,6 @@
 # Feature Catalogue and Product Positioning
 
-**Status:** Version 1.6.0 is the current stable release. It adds Boolean quoted-literal search to TUI regex search. The 1.6.0 tagged workflow verifies platform builds and tests. Exact behavior and known limits are specified in [Technical Specification](TECHNICAL_SPECIFICATION.md).
+**Status:** Version 1.7.0 is the current stable release. It adds Apache Error parsing and introduces an optional Windows-verified Nuklear/SDL3 desktop GUI preview. GUI builds on Linux and macOS remain unverified. Exact behavior and known limits are specified in [Technical Specification](TECHNICAL_SPECIFICATION.md).
 
 ## 1. Users and jobs
 
@@ -36,6 +36,8 @@ Common application fields worth preserving are timestamp, severity, message, ser
 | Multi-file merge | Implemented in 1.4 | Correlate several services | Batch only; each source must be timestamp-monotonic. Unknown timestamps are grouped at the end. TUI, follow, and result-window modes remain single-file. |
 | Native journal/Event Log readers | Later | Inspect platform stores directly | Conflicts with a simple portable file-only v1. |
 | Kubernetes CRI parser | Implemented in 1.5 | Filter container stdout/stderr and inspect timestamps and fragment tags | One physical CRI row remains one record; `P`/`F` are exposed as tags. |
+| Apache Error parser | Implemented in 1.7 | Filter Apache server errors by timestamp, severity, module, and client address | Timezone-free timestamps are interpreted as UTC for statistics. Continuation lines remain raw records. |
+| Optional desktop GUI | Preview in 1.7 | Search, filter, page, inspect, analyze, export, and follow logs in a three-pane desktop interface | Requires SDL3; Windows build verified. Linux/macOS GUI builds and GUI packages are not yet verified. |
 | Multiline event reconstruction, compressed input | Later | Reassemble fragments and inspect rotated/compressed archives | Needs explicit rules for partial records, rotation, and dependencies. |
 | Automatic template discovery | Research | Reduce custom-pattern setup | Related to [Drain](https://pinjiahe.github.io/files/pdf/research/ICWS17.pdf); not required for v1. |
 

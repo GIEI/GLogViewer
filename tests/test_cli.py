@@ -100,7 +100,7 @@ def main():
             "help should list the documented CLI features")
     version_result = run(binary, "--version")
     require(version_result.returncode == 0 and
-            version_result.stdout == b"logview 1.6.0\n",
+            version_result.stdout == b"logview 1.7.0\n",
             "version should print the program name and version")
     scratch_root = Path(__file__).resolve().parents[1] / "build" / "test-tmp"
     scratch_root.mkdir(parents=True, exist_ok=True)
@@ -1726,6 +1726,30 @@ def main():
                       "--filter", "status=204")
         require(common.returncode == 0 and common.stdout == common_line,
                 "Apache Common parsing should accept the Common field layout")
+
+        error_file = root / "apache-error.log"
+        error_line = (
+            b"[Mon Feb 27 05:41:08 2006] [error] [client 212.34.140.103] "
+            b"File does not exist: /var/www/html/missing\n"
+        )
+        modern_error = (
+            b"[Wed Oct 11 14:32:52.123456 2023] [core:error] [pid 123] "
+            b"[client 192.0.2.5] Modern error message\n"
+        )
+        error_file.write_bytes(error_line + modern_error)
+        result = run(binary, str(error_file), "--format", "apache-error",
+                     "--filter", "level=error and source=212.34.140.103")
+        require(result.returncode == 0 and result.stdout == error_line,
+                "Apache Error parsing should expose timestamp, level, and client source")
+        result = run(binary, str(error_file), "--format", "auto",
+                     "--filter", "module=core and source=192.0.2.5")
+        require(result.returncode == 0 and result.stdout == modern_error,
+                "auto detection should recognize Apache Error and its modern module field")
+        result = run(binary, str(error_file), "--format", "apache-error", "--stats")
+        require(result.returncode == 0 and
+                b"Timestamped records: 2" in result.stdout and
+                b"Unknown timestamps: 0" in result.stdout,
+                "Apache Error timestamps should populate time statistics")
 
         syslog_file = root / "syslog.log"
         syslog3164 = b"Oct 11 22:14:15 mymachine su[1234]: 'su root' failed\n"

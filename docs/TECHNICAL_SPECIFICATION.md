@@ -1,7 +1,7 @@
 # Technical Specification
 
 **Project:** GLogViewer (`logview`)  
-**Status:** Version 1.6.0 is stable and adds Boolean TUI search to the supported regex workflow. See [validation notes](VALIDATION.md).
+**Status:** Version 1.7.0 adds Apache Error parsing and an optional Windows-verified Nuklear/SDL3 desktop GUI preview. The GUI is not included in CLI/TUI release archives. See [validation notes](VALIDATION.md).
 **Language:** C99; all repository content is English.
 
 ## 1. Purpose and scope
@@ -17,7 +17,7 @@ The format list is grounded in source specifications and software documentation.
 | Source software or domain | Log form users analyze | Fields of interest | Initial handling |
 | --- | --- | --- | --- |
 | Unix services, network equipment, syslog collectors | BSD-style syslog and RFC 5424 syslog | time, host, application, process, priority, message | Two separate presets; RFC 5424 structured data retained as raw field in v1. [RFC 3164](https://www.rfc-editor.org/info/rfc3164/), [RFC 5424](https://www.rfc-editor.org/info/rfc5424/) |
-| Apache HTTP Server | Common and Combined access logs; separate error logs | client address, request, status, bytes, referrer, agent | Access presets; error logs through custom pattern. [Apache log documentation](https://httpd.apache.org/docs/2.4/logs.html) |
+| Apache HTTP Server | Common and Combined access logs; separate error logs | client address, request, status, bytes, referrer, agent, error level, module | Access and error presets. [Apache log documentation](https://httpd.apache.org/docs/2.4/logs.html) |
 | NGINX | Configurable access logs and error logs | remote address, request, status, upstream clues | Combined access preset; custom `log_format` through custom pattern. [NGINX log module](https://nginx.org/en/docs/http/ngx_http_log_module.html), [NGINX logging guide](https://docs.nginx.com/nginx/admin-guide/monitoring/logging/) |
 | Applications, including Java services using Log4j | Text patterns or JSON events | timestamp, severity, message, service, request/trace ID | Custom pattern or simple JSON Lines. [Log4j layouts](https://logging.apache.org/log4j/2.x/manual/layouts.html), [OpenTelemetry log model](https://opentelemetry.io/docs/specs/otel/logs/data-model/) |
 | Docker containers | JSON records with `log`, `stream`, and `time` | stream, timestamp, message | Compatible JSON-object mapping from an exported copy; direct modification of Docker-managed files is discouraged by Docker. [Docker JSON-file driver](https://docs.docker.com/engine/logging/drivers/json-file/) |
@@ -35,7 +35,7 @@ The `cri` preset accepts `<timestamp> <stream> <tag> <message>`, where timestamp
 | ID | Requirement | Acceptance result |
 | --- | --- | --- |
 | RF-01 | Stream one regular file larger than 1 GB | No file-size-proportional heap growth during a CLI scan. |
-| RF-02 | Parse `syslog3164`, `syslog5424`, `cri`, `apache-common`, `apache-combined`, `nginx-combined`, `jsonl`, and `custom` | Golden fixtures produce documented normalized fields. |
+| RF-02 | Parse `syslog3164`, `syslog5424`, `cri`, `apache-common`, `apache-combined`, `apache-error`, `nginx-combined`, `jsonl`, and `custom` | Golden fixtures produce documented normalized fields. |
 | RF-03 | Compile custom `%{TOKEN}` and `%{TOKEN:name}` patterns | Valid patterns extract fields; invalid/ambiguous patterns fail before scanning. |
 | RF-04 | Include or exclude raw lines and filter individual fields with built-in regex | Match spans, exclusions, and field predicates agree with test vectors. |
 | RF-05 | Combine predicates with `and`, `or`, and parentheses | Precedence and missing-field behavior match section 7. |
@@ -60,7 +60,7 @@ Parse failures retain `raw` and source position for raw regex filtering and TUI 
 ## 5. Proposed CLI and exit behavior
 
 ```text
-logview <file> [--format auto|raw|syslog3164|syslog5424|cri|apache-common|apache-combined|nginx-combined|jsonl|custom]
+logview <file> [--format auto|raw|syslog3164|syslog5424|cri|apache-common|apache-combined|apache-error|nginx-combined|jsonl|custom]
                [--pattern <pattern>] [--filter <expression>] [--regex <regex>]
                [--regex-field <field>=<regex>] [--exclude-regex <regex>]
                [--stats [--stats-field FIELD]]
@@ -135,7 +135,7 @@ The compiler builds an AST for syntax validation and then a Thompson-style NFA p
 
 ## 8. Statistics
 
-`--stats` reports exact counts of physical, parsed, rejected, and selected records. Per-level counts, timeline bins, and frequent fields describe **selected** records; missing level appears as `UNSPECIFIED`. A fixed 256-bin timeline covers the observed timestamp range, so a two-pass scan is used for timeline output on seekable files; timestamps lacking a zone or otherwise ambiguous are listed as unknown and omitted from bins. The time range and bin width are printed. ISO/RFC 3339 timestamps with `Z` or numeric offsets and Apache Combined timestamps are interpreted. RFC 3164 timestamps can be interpreted when `--syslog-year YYYY` is supplied; `--syslog-timezone +/-HH:MM` sets the assumed fixed offset and defaults to UTC. The configured year is applied uniformly, so year-boundary rollover is not inferred. These options require `--format syslog3164` or `--format auto` and affect timeline interpretation only. Frequent field-name and field-value pairs use a bounded Space-Saving table of 512 candidates. A candidate with zero error is marked exact; otherwise it is marked estimated and includes an upper error bound. `--stats-field FIELD` limits candidates to the named parsed field and implies stats mode. The timeline's second pass reapplies the same parser and filters; timestamps beyond the first-pass range cause a read/statistics error.
+`--stats` reports exact counts of physical, parsed, rejected, and selected records. Per-level counts, timeline bins, and frequent fields describe **selected** records; missing level appears as `UNSPECIFIED`. A fixed 256-bin timeline covers the observed timestamp range, so a two-pass scan is used for timeline output on seekable files; timestamps lacking a zone or otherwise ambiguous are listed as unknown and omitted from bins. The time range and bin width are printed. ISO/RFC 3339 timestamps with `Z` or numeric offsets and Apache access timestamps are interpreted. Apache Error timestamps are interpreted as UTC because the format carries no timezone. RFC 3164 timestamps can be interpreted when `--syslog-year YYYY` is supplied; `--syslog-timezone +/-HH:MM` sets the assumed fixed offset and defaults to UTC. The configured year is applied uniformly, so year-boundary rollover is not inferred. These options require `--format syslog3164` or `--format auto` and affect timeline interpretation only. Frequent field-name and field-value pairs use a bounded Space-Saving table of 512 candidates. A candidate with zero error is marked exact; otherwise it is marked estimated and includes an upper error bound. `--stats-field FIELD` limits candidates to the named parsed field and implies stats mode. The timeline's second pass reapplies the same parser and filters; timestamps beyond the first-pass range cause a read/statistics error.
 
 ## 9. Export
 

@@ -1,6 +1,6 @@
 # Software Architecture
 
-**Status:** architecture for stable versions 1.0 through 1.6.0. The 1.6 release adds a bounded Boolean query parser for TUI search. The behavioral contract is in [Technical Specification](TECHNICAL_SPECIFICATION.md), and validation evidence is in [Validation notes](VALIDATION.md).
+**Status:** architecture for stable versions 1.0 through 1.7.0. Version 1.7 adds Apache Error parsing and an optional Nuklear/SDL3 desktop presentation layer. The GUI remains a Windows-verified preview; the core CLI/TUI has no SDL3 dependency. The behavioral contract is in [Technical Specification](TECHNICAL_SPECIFICATION.md), and validation evidence is in [Validation notes](VALIDATION.md).
 
 ## 1. Architectural goals
 

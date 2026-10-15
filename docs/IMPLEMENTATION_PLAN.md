@@ -1,6 +1,6 @@
 # GLogViewer Implementation Plan
 
-**Status:** Version 1.6.0 is complete. The tagged workflow runs the full Windows, Linux, and macOS test matrix, Linux sanitizers, and cross-platform package checks. All project content and code comments follow the English-only policy in [AGENTS.md](../AGENTS.md).
+**Status:** Version 1.7.0 adds Apache Error log parsing and an optional Windows-verified desktop GUI preview. The CLI/TUI release gate runs the Windows, Linux, and macOS test matrix, Linux sanitizers, and cross-platform package checks. GUI builds on Linux and macOS remain open. All project content and code comments follow the English-only policy in [AGENTS.md](../AGENTS.md).
 
 ## Product goals
 
@@ -125,6 +125,22 @@ Version 1.1 provides bounded streaming, JSON and text formats, named parsers, fi
 - Invalid expressions produce a recoverable TUI error and leave the previous search intact.
 - Windows, Linux, and macOS builds and applicable TUI checks pass.
 
+## Release 1.7: Apache Error logs and desktop GUI preview
+
+### Implemented work
+
+- Parse Apache Error records into timestamp, level, message, optional module, and optional client address fields; recognize the format during auto-detection.
+- Include timezone-free Apache Error timestamps in statistics as UTC.
+- Add an optional Nuklear/SDL3 desktop GUI with incremental scans, search, filters, paged results, record inspection, analysis, export, follow, timers, and a bottom-anchored status panel.
+- Support UTF-8 paths for GUI exports on Windows and auto-discover common extracted SDL3 development packages in the Windows build script.
+- Keep the default CLI/TUI build independent of SDL3; release archives continue to package the CLI/TUI binary.
+
+### Release evidence
+
+- Windows CLI build and full sample suite pass locally.
+- Windows GUI build with SDL3 3.4.18 succeeds; a live 1 GiB scan capture confirms that status, timing, record counts, and cancellation remain visible.
+- Linux and macOS GUI builds and interactive validation are deferred; CI release gates cover the CLI/TUI on all three platforms.
+
 ## Later candidates
 
 Compressed input, multi-line event reconstruction, and persistent indexes are candidates rather than commitments. Evaluate each against user demand, portability, input safety, licensing, implementation cost, and measured benefit. A persistent index must detect file replacement or modification and recover without returning stale results. Automatic log-template discovery remains research work and should not delay the core local investigation workflow.
@@ -136,3 +152,7 @@ Compressed input, multi-line event reconstruction, and persistent indexes are ca
 - Record benchmark hardware, compiler, storage, cache state, and run count. Do not compare timings across machines as if they were controlled results.
 - Run clean builds and the full applicable test suite on Windows, Linux, and macOS before publishing a release. Run available sanitizers and package checks.
 - Audit all changed and added files for English-only content before commit and release.
+
+## Desktop GUI preview
+
+The optional Nuklear/SDL3 desktop GUI preview is included in 1.7.0 source. The CLI/TUI builds remain independent of SDL3. Windows GUI build and scan layout checks pass; macOS/Linux GUI verification, visual interaction checks, and packaging remain open. See the [desktop GUI implementation plan](GUI_IMPLEMENTATION_PLAN.md) for current scope and remaining work.

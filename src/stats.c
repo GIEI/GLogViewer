@@ -341,6 +341,34 @@ int stats_timestamp_epoch_configured(ByteSpan timestamp,
         position += 3;
         if (position >= length || data[position++] != '/' ||
             !decimal(data, length, &position, 4, 4, &year) || position >= length || data[position++] != ':' ) return 0;
+    } else if (length >= 24 && data[3] == ' ' && data[7] == ' ' &&
+               parse_month(data, 4) != 0) {
+        size_t fraction_start;
+        position = 8;
+        while (position < length && data[position] == ' ') position++;
+        if (!decimal(data, length, &position, 1, 2, &day) ||
+            position >= length || data[position++] != ' ' ||
+            !decimal(data, length, &position, 2, 2, &hour) ||
+            position >= length || data[position++] != ':' ||
+            !decimal(data, length, &position, 2, 2, &minute) ||
+            position >= length || data[position++] != ':' ||
+            !decimal(data, length, &position, 2, 2, &second)) return 0;
+        if (position < length && data[position] == '.') {
+            position++;
+            fraction_start = position;
+            while (position < length && data[position] >= '0' &&
+                   data[position] <= '9') position++;
+            if (position == fraction_start) return 0;
+        }
+        if (position >= length || data[position++] != ' ' ||
+            !decimal(data, length, &position, 4, 4, &year) ||
+            position != length) return 0;
+        month = (unsigned)parse_month(data, 4);
+        if (!valid_date_time(year, month, day, hour, minute, second)) return 0;
+        *epoch = days_from_civil((int)year, month, day) * INT64_C(86400) +
+                 (int64_t)hour * 3600 + (int64_t)minute * 60 +
+                 (int64_t)second;
+        return 1;
     } else if (config != NULL && config->syslog_year != 0 &&
                length == 15 && data[3] == ' ' && data[6] == ' ' &&
                data[9] == ':' && data[12] == ':') {

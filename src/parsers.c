@@ -191,6 +191,113 @@ static int month_number(const unsigned char *data, size_t start)
     return 0;
 }
 
+static int apache_error_timestamp(const unsigned char *data, size_t length)
+{
+    size_t position = 0;
+    unsigned value;
+    size_t index;
+    if (length < 24) return 0;
+    for (index = 0; index < 3; index++) {
+        if (!((data[index] >= 'A' && data[index] <= 'Z') ||
+              (data[index] >= 'a' && data[index] <= 'z'))) return 0;
+    }
+    if (data[3] != ' ' || !month_number(data, 4) || data[7] != ' ') return 0;
+    position = 8;
+    while (position < length && data[position] == ' ') position++;
+    index = position;
+    while (position < length && is_digit(data[position]) && position - index < 2)
+        position++;
+    if (!parse_uint(data, index, position - index, 31, &value) || value == 0 ||
+        position >= length || data[position++] != ' ') return 0;
+    for (index = 0; index < 8; index++) {
+        if (position >= length) return 0;
+        if (index == 2 || index == 5) {
+            if (data[position++] != ':') return 0;
+        } else if (!is_digit(data[position++])) return 0;
+    }
+    if (position < length && data[position] == '.') {
+        position++;
+        index = position;
+        while (position < length && is_digit(data[position])) position++;
+        if (position == index) return 0;
+    }
+    if (position >= length || data[position++] != ' ' ||
+        length - position != 4) return 0;
+    for (index = 0; index < 4; index++) {
+        if (!is_digit(data[position + index])) return 0;
+    }
+    return 1;
+}
+
+static int parse_apache_error(LogEntry *entry)
+{
+    const unsigned char *data = entry->raw.data;
+    size_t length = entry->raw.length;
+    size_t position = 1;
+    size_t timestamp_length;
+    size_t level_start;
+    size_t level_length;
+    size_t module_length = 0;
+    size_t client_start = 0;
+    size_t client_length = 0;
+    size_t message_start;
+    if (length < 30 || data[0] != '[') return 0;
+    while (position < length && data[position] != ']') position++;
+    if (position >= length || !apache_error_timestamp(data + 1, position - 1)) return 0;
+    timestamp_length = position - 1;
+    position++;
+    if (position + 3 >= length || data[position++] != ' ' ||
+        data[position++] != '[') return 0;
+    level_start = position;
+    while (position < length && data[position] != ']') position++;
+    if (position >= length || position == level_start) return 0;
+    level_length = position - level_start;
+    {
+        size_t index;
+        for (index = 0; index < level_length; index++) {
+            if (data[level_start + index] == ':') {
+                module_length = index;
+                level_start += index + 1;
+                level_length -= index + 1;
+                break;
+            }
+        }
+    }
+    if (level_length == 0) return 0;
+    position++;
+    while (position + 2 < length && data[position] == ' ' &&
+           data[position + 1] == '[') {
+        size_t token_start = position + 2;
+        position = token_start;
+        while (position < length && data[position] != ']') position++;
+        if (position >= length) return 0;
+        if (position - token_start > 7 &&
+            memcmp(data + token_start, "client ", 7) == 0) {
+            client_start = token_start + 7;
+            client_length = position - client_start;
+        }
+        position++;
+    }
+    if (position < length && data[position] == ' ') position++;
+    message_start = position;
+    entry->field_count = 0;
+    if (!add_slice(entry, "timestamp", 1, timestamp_length) ||
+        !add_slice(entry, "level", level_start, level_length) ||
+        !add_slice(entry, "message", message_start, length - message_start) ||
+        !add_field(entry, "source", client_length != 0 ? data + client_start :
+                   module_length != 0 ? data + level_start - module_length - 1 :
+                   (const unsigned char *)"apache",
+                   client_length != 0 ? client_length :
+                   module_length != 0 ? module_length : 6)) return 0;
+    if (module_length != 0 &&
+        !add_slice(entry, "module", level_start - module_length - 1,
+                   module_length)) return 0;
+    if (client_length != 0 &&
+        !add_slice(entry, "client_ip", client_start, client_length)) return 0;
+    entry->parse_ok = 1;
+    return 1;
+}
+
 static int parse_syslog3164(LogEntry *entry)
 {
     const unsigned char *data = entry->raw.data;
@@ -411,6 +518,7 @@ InputFormat parser_format_from_name(const char *name)
     if (strcmp(name, "cri") == 0) return FORMAT_CRI;
     if (strcmp(name, "apache-common") == 0) return FORMAT_APACHE_COMMON;
     if (strcmp(name, "apache-combined") == 0) return FORMAT_APACHE_COMBINED;
+    if (strcmp(name, "apache-error") == 0) return FORMAT_APACHE_ERROR;
     if (strcmp(name, "nginx-combined") == 0) return FORMAT_NGINX_COMBINED;
     if (strcmp(name, "custom") == 0) return FORMAT_CUSTOM;
     if (strcmp(name, "auto") == 0) return FORMAT_AUTO;
@@ -429,6 +537,7 @@ int parser_format_line(InputFormat format, LogEntry *entry)
     case FORMAT_SYSLOG5424: return parse_syslog5424(entry);
     case FORMAT_CRI: return parse_cri(entry);
     case FORMAT_APACHE_COMMON: return parse_http(entry, 0);
+    case FORMAT_APACHE_ERROR: return parse_apache_error(entry);
     case FORMAT_APACHE_COMBINED:
     case FORMAT_NGINX_COMBINED: return parse_http(entry, 1);
     default: return 0;
@@ -439,7 +548,8 @@ InputFormat parser_detect_format(const unsigned char *const *lines,
                                  const size_t *lengths, size_t count)
 {
     static const InputFormat candidates[] = {FORMAT_JSONL, FORMAT_CRI, FORMAT_SYSLOG5424,
-        FORMAT_SYSLOG3164, FORMAT_APACHE_COMMON, FORMAT_APACHE_COMBINED};
+        FORMAT_SYSLOG3164, FORMAT_APACHE_ERROR, FORMAT_APACHE_COMMON,
+        FORMAT_APACHE_COMBINED};
     unsigned scores[sizeof(candidates) / sizeof(candidates[0])] = {0};
     unsigned best = 0;
     size_t best_index = 0;
@@ -450,7 +560,14 @@ InputFormat parser_detect_format(const unsigned char *const *lines,
                (lines[index][position] == ' ' || lines[index][position] == '\t' ||
                 lines[index][position] == '\r')) position++;
         if (position == lengths[index]) continue;
-        if (lines[index][position] == '[') return FORMAT_JSONL;
+        if (lines[index][position] == '[') {
+            LogEntry entry;
+            memset(&entry, 0, sizeof(entry));
+            entry.raw.data = lines[index] + position;
+            entry.raw.length = lengths[index] - position;
+            if (parse_apache_error(&entry)) break;
+            return FORMAT_JSONL;
+        }
         if (lines[index][position] == '{') {
             size_t end = lengths[index];
             while (end > position &&

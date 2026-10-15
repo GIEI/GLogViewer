@@ -28,6 +28,10 @@ int output_init(OutputSink *sink, const char *path, const char *input_path,
                 OutputFormat format, const char *columns, int force,
                 int include_source_file,
                 char *error, size_t error_capacity);
+int output_init_utf8(OutputSink *sink, const char *path, const char *input_path,
+                     OutputFormat format, const char *columns, int force,
+                     int include_source_file,
+                     char *error, size_t error_capacity);
 int output_write(OutputSink *sink, const LogEntry *entry);
 int output_write_source(OutputSink *sink, const LogEntry *entry,
                         const char *source_path);

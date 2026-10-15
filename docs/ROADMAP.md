@@ -1,6 +1,6 @@
 # GLogViewer Product Roadmap
 
-**Status:** Version 1.6.0 is the current stable release. The tag-triggered workflow runs the Windows, Linux, and macOS test matrix, sanitizer, package, and provenance checks. This roadmap preserves release history and defines the next direction. See the [implementation plan](IMPLEMENTATION_PLAN.md) and [validation notes](VALIDATION.md).
+**Status:** Version 1.7.0 is the current stable release. The tag-triggered workflow runs the Windows, Linux, and macOS CLI/TUI test matrix, sanitizer, package, and provenance checks. This roadmap preserves release history and defines the next direction. See the [implementation plan](IMPLEMENTATION_PLAN.md) and [validation notes](VALIDATION.md).
 
 ## Product decision
 
@@ -24,7 +24,7 @@ The numbers identify capability milestones, not calendar dates. A stage is compl
 
 ## Recent milestones and post-1.3 roadmap
 
-Versions 1.2 through 1.6 are complete. Later milestones will evaluate additional formats. Each release is complete only when its exit gate passes on Windows, Linux, and macOS.
+Versions 1.2 through 1.7 are complete. Later milestones will evaluate additional formats. Each CLI/TUI release is complete only when its exit gate passes on Windows, Linux, and macOS.
 
 | Release | User-visible outcome | Main additions | Exit gate |
 | --- | --- | --- | --- |
@@ -33,9 +33,14 @@ Versions 1.2 through 1.6 are complete. Later milestones will evaluate additional
 | **1.4 Multi-file analysis** | Correlate events across related files in chronological order. | Multiple input files, source-file labels, timestamp ordering, explicit handling of records without usable timestamps, aggregated statistics. | Ordering, tie, and missing-timestamp policies are documented and tested; multi-file follow is explicitly deferred; bounded-memory behavior is documented; platform CI passes. |
 | **1.5 Container log support** | Filter Kubernetes container logs without a custom pattern. | CRI parser, auto-detection, stream/tag/message fields, RFC 3339 Nano statistics. | Released as 1.5.0; owner reports the full test suite passes on Windows, Linux, and macOS. |
 | **1.6 Boolean TUI search** | Combine exact literal terms without escaping regex punctuation. | Quoted terms, `AND`/`OR`/`NOT`, parentheses, documented precedence, regex compatibility. | Released as 1.6.0; CI validates Windows, Linux, and macOS builds and tests. |
+| **1.7 Apache Error and desktop preview** | Inspect Apache server errors and explore logs in a desktop interface. | Apache Error parsing and statistics; optional Nuklear/SDL3 GUI with search, filters, paging, details, analysis, export, and follow. | CLI/TUI release gates pass on Windows, Linux, and macOS. Windows GUI build and live scan layout are verified; other GUI platforms remain open. |
 | **1.x Format expansion** | Inspect more operational data with the same local workflow. | Compressed input and additional container formats, selected by demand and dependency review. | Format fixtures, malformed-input behavior, portability, license/dependency review, and large-file performance are documented before inclusion. |
 
-Version 1.6.0 is the current stable release and includes Boolean TUI search along with repeatable query profiles, source-line bookmarks, adjustable context, multi-file analysis, and Kubernetes CRI support. See the [implementation plan](IMPLEMENTATION_PLAN.md) and [release changelog](../CHANGELOG.md).
+Version 1.7.0 includes Apache Error parsing and a Windows-verified desktop GUI preview, along with Boolean TUI search, query profiles, bookmarks, multi-file analysis, and Kubernetes CRI support. The GUI requires SDL3 and is not included in the CLI/TUI platform archives. See the [implementation plan](IMPLEMENTATION_PLAN.md) and [release changelog](../CHANGELOG.md).
+
+## Desktop GUI
+
+The optional Nuklear/SDL3 GUI preview includes Boolean and regex search, structured filters, custom patterns, full-result paging, source-line jump, bookmarks, severity navigation, context, JSON formatting, field-value analysis, a time histogram, export, follow, and load timers. Windows build and scan layout checks pass. macOS/Linux GUI builds, interactive visual tests, automated GUI behavior coverage, and packaging remain planned. See the [desktop GUI implementation plan](GUI_IMPLEMENTATION_PLAN.md) for details.
 
 Version 1.2 extends the 1.1 statistics and full-record inspection with focused field summaries, a navigable TUI histogram, and readable JSON presentation. It does not change source records or export content. See [implementation plan](IMPLEMENTATION_PLAN.md) for implementation and acceptance details.
 

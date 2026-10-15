@@ -21,7 +21,7 @@
 #include <windows.h>
 #endif
 
-#define LOGVIEW_VERSION "1.6.0"
+#define LOGVIEW_VERSION "1.7.0"
 #define FIELD_NAME_CAPACITY 256
 #define PROFILE_VALUE_CAPACITY 4096
 #define LOGVIEW_MAX_INPUTS 16
@@ -102,7 +102,8 @@ static void print_usage(FILE *stream)
           "\n"
           "Options:\n"
           "  --format FORMAT          raw, jsonl, syslog3164, syslog5424, cri,\n"
-          "                           apache-common, apache-combined, nginx-combined,\n"
+          "                           apache-common, apache-combined, apache-error,\n"
+          "                           nginx-combined,\n"
           "                           custom, or auto (default: raw).\n"
           "                           With multiple files (up to 16), one shared format is used; auto detects each file.\n"
           "  --pattern PATTERN        Define a custom %{TOKEN} parsing pattern.\n"
@@ -194,6 +195,7 @@ static const char *profile_format_name(InputFormat format)
     case FORMAT_CRI: return "cri";
     case FORMAT_APACHE_COMMON: return "apache-common";
     case FORMAT_APACHE_COMBINED: return "apache-combined";
+    case FORMAT_APACHE_ERROR: return "apache-error";
     case FORMAT_NGINX_COMBINED: return "nginx-combined";
     case FORMAT_CUSTOM: return "custom";
     case FORMAT_AUTO: return "auto";

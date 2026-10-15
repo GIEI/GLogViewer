@@ -1,6 +1,6 @@
 # User Manual
 
-**Status:** GLogViewer 1.6.0 is the stable release, adding Boolean literal search to the TUI. See the [release process](RELEASE_PROCESS.md).
+**Status:** GLogViewer 1.7.0 adds Apache Error parsing and an optional Windows-verified desktop GUI preview. See the [release process](RELEASE_PROCESS.md).
 
 ## 1. What the tool will do
 
@@ -35,7 +35,7 @@ logview <file> [<file> ...] [--format FORMAT] [--pattern PATTERN] [--filter EXPR
                 [--max-line-bytes count]
 ```
 
-`--format raw` is the default. Formats include `raw`, `jsonl`, `syslog3164`, `syslog5424`, `apache-common`, `apache-combined`, `nginx-combined`, `custom`, and `auto`. `--filter` accepts equality, inequality, regex, and lexical range comparisons combined with `and`, `or`, and parentheses. `--regex` searches the entire raw line; `--regex-field` searches a parsed field; `--exclude-regex` removes records whose raw line matches its pattern. Positive and exclusion regexes combine with each other and with `--filter` using AND. Matching is case-sensitive. `--stats` prints exact record and level counts, a 256-bin timestamp timeline, and frequent field/value pairs, marking each count exact or estimated. Add `--stats-field FIELD` to show frequent values only for a particular parsed field; it also enables stats mode by itself. Timestamp aggregation recognizes ISO/RFC 3339 values with `Z` or a numeric offset and Apache Combined timestamps. RFC 3164 timestamps need `--syslog-year YYYY`; their timezone defaults to UTC and can be set with `--syslog-timezone +/-HH:MM`. Dates without enough information to interpret them remain unknown. The timeline makes a second streaming pass over the input. `--follow` waits for appended complete lines, detects file truncation and rotation, and handles Ctrl-C. `--export` streams selected records to a text or CSV file. Use `--help` or `--version` to inspect the built program.
+`--format raw` is the default. Formats include `raw`, `jsonl`, `syslog3164`, `syslog5424`, `cri`, `apache-common`, `apache-combined`, `apache-error`, `nginx-combined`, `custom`, and `auto`. `--filter` accepts equality, inequality, regex, and lexical range comparisons combined with `and`, `or`, and parentheses. `--regex` searches the entire raw line; `--regex-field` searches a parsed field; `--exclude-regex` removes records whose raw line matches its pattern. Positive and exclusion regexes combine with each other and with `--filter` using AND. Matching is case-sensitive. `--stats` prints exact record and level counts, a 256-bin timestamp timeline, and frequent field/value pairs, marking each count exact or estimated. Add `--stats-field FIELD` to show frequent values only for a particular parsed field; it also enables stats mode by itself. Timestamp aggregation recognizes ISO/RFC 3339 values with `Z` or a numeric offset, Apache access timestamps, and Apache Error timestamps. Apache Error timestamps have no timezone; the timeline interprets them as UTC. RFC 3164 timestamps need `--syslog-year YYYY`; their timezone defaults to UTC and can be set with `--syslog-timezone +/-HH:MM`. Dates without enough information to interpret them remain unknown. The timeline makes a second streaming pass over the input. `--follow` waits for appended complete lines, detects file truncation and rotation, and handles Ctrl-C. `--export` streams selected records to a text or CSV file. Use `--help` or `--version` to inspect the built program.
 
 The command form below documents the current CLI options. See the [release process](RELEASE_PROCESS.md) for platform archive details and verification.
 
@@ -55,7 +55,7 @@ logview <file> [--format <name>] [--pattern <pattern>]
 
 Multi-file batch runs use one format for every source, unless `--format auto` is selected. They merge by timestamp and label each record with its source path and source line. TUI and follow remain single-file modes.
 
-The default is batch text output and `raw` input. Format names are `raw`, `syslog3164`, `syslog5424`, `cri`, `apache-common`, `apache-combined`, `nginx-combined`, `jsonl`, `custom`, and `auto`. Auto detection samples up to 32 complete lines or 256 KiB and falls back to raw if no format is confidently detected. `--pattern` requires `--format custom`. `--stats`, `--export`, and `--tui` choose distinct primary output modes. `--follow` cannot be combined with `--stats` or `--export`. `--tui` needs an interactive terminal.
+The default is batch text output and `raw` input. Format names are `raw`, `syslog3164`, `syslog5424`, `cri`, `apache-common`, `apache-combined`, `apache-error`, `nginx-combined`, `jsonl`, `custom`, and `auto`. Auto detection samples up to 32 complete lines or 256 KiB and falls back to raw if no format is confidently detected. `--pattern` requires `--format custom`. `--stats`, `--export`, and `--tui` choose distinct primary output modes. `--follow` cannot be combined with `--stats` or `--export`. `--tui` needs an interactive terminal.
 
 ### Basic examples
 
@@ -99,8 +99,11 @@ Quote expressions for the shell. On Windows PowerShell and Unix shells, double q
 | `<34>1 2026-10-08T09:15:00Z host app 123 ID47 - message` | `syslog5424` | RFC 5424 header fields and message. |
 | `2026-10-12T09:15:00.123456789Z stdout F application started` | `cri` | Timestamp, `stdout`/`stderr`, fragment tag, and message. |
 | `192.0.2.4 - - [08/Oct/2026:09:15:00 +0200] "GET / HTTP/1.1" 200 42 "-" "agent"` | `apache-combined` or `nginx-combined` | Client IP, request, status, bytes, referrer, agent. |
+| `[Mon Feb 27 05:41:08 2006] [error] [client 192.0.2.4] File not found` | `apache-error` | Time, level, client source, and message; module and client IP when present. |
 | `{"time":"2026-10-08T09:15:00Z","level":"ERROR","message":"timeout"}` | `jsonl` | Canonical timestamp, level, message plus original keys. |
 | `2026-10-08 09:15:00 ERROR timeout` | `custom` | Fields selected by the supplied pattern. |
+
+Apache Common and Combined are **access log** formats. Apache Error logs start with `[weekday month day time year] [level]` and need `--format apache-error` or `--format auto`. The GUI detects this mismatch and switches from an Apache access preset to Apache Error. Bare continuation lines remain visible as raw text, without invented fields. For example, `logview SAMPLES/Apache.log --format apache-error --filter "level=error" --top 10` displays the first ten errors.
 
 The `cri` preset parses Kubernetes/containerd records in the form `<RFC3339Nano timestamp> <stdout|stderr> <tag> <message>`. Use `--filter "stream=stderr"` or `--filter "tag=P"` to inspect one stream or partial fragments; `tag=F` marks a complete line. Each physical line remains a separate record in this version, so `P` fragments are not joined automatically. The original CRI line remains intact in text output and exports. `--format auto` detects CRI records, and CRI timestamps are included in `--stats` and multi-file ordering.
 
@@ -244,7 +247,33 @@ The `v` field summary scans the complete current filtered result set and is avai
 
 The `/` prompt accepts the built-in regex syntax or a Boolean search expression. In Boolean mode, write literal terms in double quotes and combine them with `AND`, `OR`, `NOT`, and parentheses. Operators are case-insensitive; precedence is `NOT`, then `AND`, then `OR`. For example, `/"66.249" AND "20/May"` matches rows containing both literal strings in either order. `/"timeout" AND NOT "retry"` excludes rows containing `retry`, and `/("ERROR" OR "FATAL") AND "database"` combines alternatives. Terms are case-sensitive. An unquoted `AND`, `OR`, or `NOT` selects Boolean mode; otherwise input remains a regular expression. Escape regex metacharacters when searching for them literally, such as `\[` or `\.`.
 
-## 9. Exit codes and troubleshooting
+## 9. Desktop GUI
+
+The optional desktop interface uses Nuklear and SDL3. Build it separately from the dependency-free CLI/TUI.
+
+On Windows, the build script finds an extracted SDL3 Visual C development package in `third_party\SDL3` or in the user's local temporary directory:
+
+```powershell
+.\build.bat gui
+.\build\logview-gui.exe SAMPLES\Linux_1GB.syslog --format syslog3164
+.\build\logview-gui.exe SAMPLES\Apache.log --format apache-error --filter "level=error"
+```
+
+If SDL3 is elsewhere, set `$env:SDL3_DIR` to the directory containing `include\SDL3\SDL.h` and `lib\x64\SDL3.lib` before building. For example: `$env:SDL3_DIR = "C:\Libraries\SDL3-3.4.18"`.
+
+On macOS or Linux, install SDL3 development files and `pkg-config`, then run `make gui` and launch `build/logview-gui SAMPLES/Linux_1GB.syslog --format syslog3164`.
+
+The GUI uses a three-pane log explorer layout: source and filters on the left, matching records in the center, and selected-record details on the right. The table shows timestamp, level, source, and message. Column widths follow the visible values, with the message using the remaining space. Choose a format and enter filters in the left pane, enter a search query in the top bar, then select **Scan / Apply**. Severity checkboxes for TRACE, DEBUG, INFO, NOTICE, WARN, ERROR, and OTHER rescan the file when changed; FATAL and CRITICAL records use ERROR. The search field accepts the TUI Boolean syntax with quoted literal terms, `AND`, `OR`, `NOT`, and parentheses. Separate inputs apply a raw-line regex, a `field=pattern` regex, and an exclusion regex. The field filter supports the same field expressions as the CLI. For custom formats, choose **Custom pattern** and enter a `%{TOKEN:name}` pattern.
+
+Use **Previous/Next match** to move through selected records and **Previous/Next error** or **Previous/Next warning** to navigate by severity. The result list is paged in groups of 64 across the full selected result set. **First**, **Previous**, **Next**, and **Last** move between pages. Enter a one-based source line and choose **Jump** to reach the nearest matching record. Toggle bookmarks on the selected record and use **Next bookmark** to visit them.
+
+The details pane has **Structured fields**, **Raw record**, and **Context** tabs. The structured view shows the message and parsed name/value pairs. The raw view reads the complete selected record in 1 KiB pages; for JSON Lines, **Format JSON** toggles a readable formatted view. Context controls adjust the number of nearby physical source lines. Enter a field name beside **Field values** to focus the frequency summary; leave it empty to summarize all fields. **Time histogram** shows UTC time buckets with counts, and selecting a bucket jumps to its first matching record. RFC 3164 statistics use the current year and UTC as the assumed timezone.
+
+Choose **Export** to write the complete active result set as text or CSV. The GUI scans again during export and remains responsive; the export can be cancelled. Select **Follow** before scanning to read existing records and continue monitoring, or enable it after a completed scan to watch for appended records. File replacement or truncation triggers a rescan. Setup, scan, and total ready times appear below the results along with byte progress.
+
+The GUI currently handles one file at a time. It does not yet save GUI query profiles or allow user-configurable columns. Windows compilation and a dummy-video scan smoke test are verified; visual interaction and macOS/Linux GUI builds still need testing.
+
+## 10. Exit codes and troubleshooting
 
 | Code | Meaning | Suggested action |
 | --- | --- | --- |
@@ -255,6 +284,6 @@ The `/` prompt accepts the built-in regex syntax or a Boolean search expression.
 
 If fields are unexpectedly missing, select the exact format rather than `auto` and inspect the raw line. If an HTTP access log has a custom `LogFormat` or `log_format`, use a custom pattern or adapt the log producer. If a line is rejected, check the 16 MiB cap, JSON nesting, malformed escapes, or a format mismatch. For a direct native journal or Windows event store, export the data to a supported text or JSON line format first.
 
-## 10. Performance and limits
+## 11. Performance and limits
 
 The design target is bounded batch memory and a 1 GB plain scan in less than 5 seconds on a documented reference machine. This has not been measured or achieved yet. Regex and parsing work add cost. The 16 MiB per-line cap, JSON-object subset, 4096-state regex cap, single-file scope, and no native compressed or binary log support are deliberate v1 limits. See [Technical Specification](TECHNICAL_SPECIFICATION.md) for precise behavior and the benchmark protocol.

@@ -78,21 +78,62 @@ static int valid_name(const char *name, size_t length)
     return 1;
 }
 
-static int same_file(const char *left, const char *right)
+static int same_file_with_encoding(const char *left, const char *right,
+                                   int paths_are_utf8)
 {
 #ifdef _WIN32
     HANDLE left_handle;
     HANDLE right_handle;
     BY_HANDLE_FILE_INFORMATION left_info;
     BY_HANDLE_FILE_INFORMATION right_info;
+    wchar_t *left_wide = NULL;
+    wchar_t *right_wide = NULL;
     int equal;
-    left_handle = CreateFileA(left, 0, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
-                              NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
-    if (left_handle == INVALID_HANDLE_VALUE) return 0;
-    right_handle = CreateFileA(right, 0, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
-                               NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
+    if (paths_are_utf8) {
+        int left_length = MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS,
+                                              left, -1, NULL, 0);
+        int right_length = MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS,
+                                               right, -1, NULL, 0);
+        if (left_length <= 0 || right_length <= 0) return 0;
+        left_wide = (wchar_t *)malloc((size_t)left_length * sizeof(*left_wide));
+        right_wide = (wchar_t *)malloc((size_t)right_length * sizeof(*right_wide));
+        if (left_wide == NULL || right_wide == NULL ||
+            MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, left, -1,
+                                left_wide, left_length) <= 0 ||
+            MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, right, -1,
+                                right_wide, right_length) <= 0) {
+            free(left_wide);
+            free(right_wide);
+            return 0;
+        }
+        left_handle = CreateFileW(left_wide, 0,
+                                  FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+                                  NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
+        right_handle = INVALID_HANDLE_VALUE;
+    } else {
+        left_handle = CreateFileA(left, 0,
+                                  FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+                                  NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
+        right_handle = INVALID_HANDLE_VALUE;
+    }
+    if (left_handle == INVALID_HANDLE_VALUE) {
+        free(left_wide);
+        free(right_wide);
+        return 0;
+    }
+    if (paths_are_utf8) {
+        right_handle = CreateFileW(right_wide, 0,
+                                   FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+                                   NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
+    } else {
+        right_handle = CreateFileA(right, 0,
+                                   FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+                                   NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
+    }
     if (right_handle == INVALID_HANDLE_VALUE) {
         CloseHandle(left_handle);
+        free(left_wide);
+        free(right_wide);
         return 0;
     }
     equal = GetFileInformationByHandle(left_handle, &left_info) &&
@@ -102,13 +143,21 @@ static int same_file(const char *left, const char *right)
             left_info.nFileIndexLow == right_info.nFileIndexLow;
     CloseHandle(left_handle);
     CloseHandle(right_handle);
+    free(left_wide);
+    free(right_wide);
     return equal;
 #else
+    (void)paths_are_utf8;
     struct stat left_stat;
     struct stat right_stat;
     if (stat(left, &left_stat) != 0 || stat(right, &right_stat) != 0) return 0;
     return left_stat.st_dev == right_stat.st_dev && left_stat.st_ino == right_stat.st_ino;
 #endif
+}
+
+static int same_file(const char *left, const char *right)
+{
+    return same_file_with_encoding(left, right, 0);
 }
 
 int output_paths_same_file(const char *left, const char *right)
@@ -242,10 +291,29 @@ static int write_header(OutputSink *sink)
     return fwrite("\r\n", 1, 2, sink->stream) == 2;
 }
 
-int output_init(OutputSink *sink, const char *path, const char *input_path,
-                OutputFormat format, const char *columns, int force,
-                int include_source_file,
-                char *error, size_t error_capacity)
+#ifdef _WIN32
+static wchar_t *utf8_path_to_wide(const char *path)
+{
+    int length = MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS,
+                                     path, -1, NULL, 0);
+    wchar_t *wide_path;
+    if (length <= 0) return NULL;
+    wide_path = (wchar_t *)malloc((size_t)length * sizeof(*wide_path));
+    if (wide_path == NULL) return NULL;
+    if (MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, path, -1,
+                            wide_path, length) <= 0) {
+        free(wide_path);
+        return NULL;
+    }
+    return wide_path;
+}
+#endif
+
+static int output_init_common(OutputSink *sink, const char *path,
+                              const char *input_path, OutputFormat format,
+                              const char *columns, int force,
+                              int include_source_file, int paths_are_utf8,
+                              char *error, size_t error_capacity)
 {
     memset(sink, 0, sizeof(*sink));
     sink->format = format;
@@ -261,7 +329,7 @@ int output_init(OutputSink *sink, const char *path, const char *input_path,
         }
         return 1;
     }
-    if (same_file(path, input_path)) {
+    if (same_file_with_encoding(path, input_path, paths_are_utf8)) {
         snprintf(error, error_capacity, "output path refers to the input file");
         return 0;
     }
@@ -269,7 +337,17 @@ int output_init(OutputSink *sink, const char *path, const char *input_path,
 #ifdef _WIN32
     {
         int flags = _O_WRONLY | _O_CREAT | _O_BINARY | (force ? _O_TRUNC : _O_EXCL);
-        int descriptor = _open(path, flags, _S_IREAD | _S_IWRITE);
+        int descriptor;
+        wchar_t *wide_path = paths_are_utf8 ? utf8_path_to_wide(path) : NULL;
+        if (paths_are_utf8 && wide_path == NULL) {
+            release_text_buffer(sink);
+            snprintf(error, error_capacity, "output path is not valid UTF-8");
+            return 0;
+        }
+        descriptor = paths_are_utf8 ?
+            _wopen(wide_path, flags, _S_IREAD | _S_IWRITE) :
+            _open(path, flags, _S_IREAD | _S_IWRITE);
+        free(wide_path);
         if (descriptor >= 0) sink->stream = _fdopen(descriptor, "wb");
         if (descriptor < 0 || sink->stream == NULL) {
             if (descriptor >= 0) _close(descriptor);
@@ -297,6 +375,23 @@ int output_init(OutputSink *sink, const char *path, const char *input_path,
         return 0;
     }
     return 1;
+}
+
+int output_init(OutputSink *sink, const char *path, const char *input_path,
+                OutputFormat format, const char *columns, int force,
+                int include_source_file, char *error, size_t error_capacity)
+{
+    return output_init_common(sink, path, input_path, format, columns, force,
+                              include_source_file, 0, error, error_capacity);
+}
+
+int output_init_utf8(OutputSink *sink, const char *path,
+                     const char *input_path, OutputFormat format,
+                     const char *columns, int force, int include_source_file,
+                     char *error, size_t error_capacity)
+{
+    return output_init_common(sink, path, input_path, format, columns, force,
+                              include_source_file, 1, error, error_capacity);
 }
 
 static int write_entry_csv(OutputSink *sink, const LogEntry *entry,
