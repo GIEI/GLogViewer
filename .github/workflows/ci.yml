@@ -107,7 +107,7 @@ jobs:
           sdl_runtime="$(brew --prefix sdl3)/lib/libSDL3.dylib"
           cp "$sdl_runtime" build/lib/libSDL3.dylib
           install_name_tool -id @rpath/libSDL3.dylib build/lib/libSDL3.dylib
-          sdl_link="$(otool -L build/logview-gui | awk '/libSDL3\.dylib/{print $1; exit}')"
+          sdl_link="$(otool -L build/logview-gui | awk '/SDL3/{print $1; exit}')"
           test -n "$sdl_link"
           install_name_tool -change "$sdl_link" @rpath/libSDL3.dylib build/logview-gui
           install_name_tool -add_rpath @loader_path/lib build/logview-gui
