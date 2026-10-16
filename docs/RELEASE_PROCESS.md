@@ -10,7 +10,7 @@ Before tagging a release:
 
 Push the version tag to trigger the release workflow. The workflow builds and tests Windows, Linux, and macOS packages, checks the binary version against the tag, runs Linux AddressSanitizer and UndefinedBehaviorSanitizer checks, creates `SHA256SUMS.txt`, generates GitHub artifact attestations for the release assets, then publishes the GitHub release. Tags containing a hyphen, such as `v1.1.0-rc.1`, are published as prereleases. Tags without a prerelease suffix, such as `v1.1.0`, are published as stable releases.
 
-Each archive contains the executable, README, license, changelog, and user manual. Linux and macOS archives retain executable permission. GitHub also provides source archives for the tagged commit. The SHA-256 file detects accidental corruption. Artifact attestations provide signed build provenance for the release assets; verify a downloaded archive with GitHub CLI:
+Each CLI archive contains the executable, README, license, changelog, and user manual. A separate GUI archive is produced for Windows, Linux, and macOS. GUI archives contain the GUI executable, SDL3 runtime, SDL3 license notice, and platform launch instructions in the included manual; Linux and macOS archives include an executable `run-logview-gui.sh` launcher. Linux GUI users still need the operating system's display and audio runtime libraries. The macOS GUI archive targets Apple Silicon (arm64). GitHub also provides source archives for the tagged commit. The SHA-256 file detects accidental corruption. Artifact attestations provide signed build provenance for release assets; verify a downloaded archive with GitHub CLI:
 
 ```sh
 gh attestation verify logview-linux-x86_64.tar.gz --repo GIEI/GLogViewer
@@ -18,4 +18,4 @@ gh attestation verify logview-linux-x86_64.tar.gz --repo GIEI/GLogViewer
 
 Use the matching downloaded archive path on Windows and macOS. Verification requires a supported GitHub CLI version and an online connection.
 
-The optional Nuklear/SDL3 desktop GUI is source-built separately from the platform archives. Its Linux and macOS builds and headless startup smoke tests are release gates; interactive desktop testing and GUI packaging remain separate follow-up work.
+The optional Nuklear/SDL3 desktop GUI is packaged as a separate platform archive. Release jobs build, run a headless scan, package the SDL3 runtime, and test archive contents on Windows, Linux, and macOS. Interactive desktop testing remains a manual check.

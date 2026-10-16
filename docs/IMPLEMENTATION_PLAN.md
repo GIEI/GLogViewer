@@ -1,6 +1,6 @@
 # GLogViewer Implementation Plan
 
-**Status:** Version 1.9.0 adds Linux/macOS GUI builds and headless startup checks to the tagged release workflow. Interactive GUI testing on those platforms remains open. The CLI/TUI release gate runs the Windows, Linux, and macOS test matrix, Linux sanitizers, and cross-platform package checks. All project content and code comments follow the English-only policy in [AGENTS.md](../AGENTS.md).
+**Status:** Version 1.9.1 publishes platform GUI archives with SDL3 runtime files. The release gate builds and smoke-tests the GUI and checks archive contents on Windows, Linux, and macOS; interactive GUI testing remains open. The CLI/TUI release gate runs the Windows, Linux, and macOS test matrix plus Linux sanitizers. All project content and code comments follow the English-only policy in [AGENTS.md](../AGENTS.md).
 
 ## Product goals
 

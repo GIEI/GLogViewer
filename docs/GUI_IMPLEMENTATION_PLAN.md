@@ -1,6 +1,6 @@
 # GLogViewer Desktop GUI Implementation Plan
 
-**Status:** The desktop GUI implements the TUI investigation workflows and is built with Nuklear 4.13.3 and SDL3. Version 1.8 adds shared query profiles, persistent preferences, configurable columns, and RFC 3164 timestamp options. A cross-platform CI job now builds the GUI and runs a dummy-video scan smoke test on Linux and macOS; the first workflow run and interactive desktop checks remain to be verified. GUI packaging and automated interactive behavior coverage remain open.
+**Status:** The desktop GUI implements the TUI investigation workflows and is built with Nuklear 4.13.3 and SDL3. Version 1.9.1 publishes platform GUI archives with the SDL3 runtime, launch scripts, and license notice. CI builds, launches, and tests GUI archives on Windows, Linux, and macOS. Interactive visual testing and automated GUI behavior coverage remain open.
 
 ## 1. Goals
 
@@ -127,7 +127,7 @@ The scan uses work slices of up to 80 ms, disables renderer VSync while scanning
 
 ### Phase 4: packaging and release
 
-- Produce optional GUI packages for Windows, macOS, and Linux with required SDL3 runtime files and notices.
+- Produce optional GUI packages for Windows, macOS, and Linux with required SDL3 runtime files and notices. **Completed in 1.9.1.**
 - Test clean-machine startup, file dialogs, Unicode paths, high-DPI displays, long paths, large files, and shutdown while scanning.
 - Document `logview-gui` installation and distinguish it from the dependency-free CLI build.
 - Run GUI smoke tests in CI where display infrastructure exists; retain manual platform checks for window-system-specific behavior.
@@ -149,7 +149,7 @@ The scan uses work slices of up to 80 ms, disables renderer VSync while scanning
 - **Renderer adapter:** Nuklear has no default renderer. The SDL3 adapter must correctly handle clipping, font textures, high-DPI scaling, and resource recreation after resize/device loss.
 - **Desktop polish:** Nuklear is immediate-mode and customizable, but its controls are not native system widgets. Validate keyboard behavior, screen-reader limitations, and visual consistency before committing to the design.
 - **Session extraction:** `src/tui.c` currently owns substantial indexing and interaction behavior. Extracting it without changing mature CLI/TUI semantics is the main engineering risk.
-- **Dependency distribution:** optional GUI packages need platform-specific SDL3 packaging and license notices, while the source-level CLI remains dependency-free.
+- **Dependency distribution:** platform GUI packages bundle SDL3 and its license notice; Linux users still need compatible host graphics/audio runtime libraries. The source-level CLI remains dependency-free.
 - **Search model:** sorting arbitrary columns and global multi-file filtering may require indexes or repeated scans. They must not silently violate bounded memory or latency expectations.
 
 ## 8. Acceptance criteria for the first GUI release

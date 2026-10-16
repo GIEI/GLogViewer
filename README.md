@@ -1,6 +1,6 @@
 # GLogViewer
 
-GLogViewer is a cross-platform, dependency-free C99 CLI/TUI for exploring large structured log files. The optional desktop GUI uses SDL3. The executable is `logview`. The batch CLI supports raw and JSON Lines input, syslog RFC 3164/5424, Kubernetes CRI container logs, Apache access and Error logs, custom patterns, format detection, compound and range filters, regex, reusable query profiles, record sampling, text/CSV export, exact record/level counts, timestamp timelines, estimated frequent field values, and follow mode with truncation and rotation detection. The TUI supports bounded result windows, viewport navigation, regex and Boolean quoted-literal search, source-line jumps and bookmarks, error/warning jumps, configurable physical context, formatted JSON zoom, field-value summaries, time histograms, filter edits, export, and live follow. Version 1.9.0 adds Linux/macOS GUI build and startup checks to CI. The latest stable release is [1.9.0](https://github.com/GIEI/GLogViewer/releases/tag/v1.9.0). See the [release notes](CHANGELOG.md), [user manual](docs/USER_MANUAL.md), and [known limits](docs/TECHNICAL_SPECIFICATION.md).
+GLogViewer is a cross-platform, dependency-free C99 CLI/TUI for exploring large structured log files. The optional desktop GUI uses SDL3. The executable is `logview`. The batch CLI supports raw and JSON Lines input, syslog RFC 3164/5424, Kubernetes CRI container logs, Apache access and Error logs, custom patterns, format detection, compound and range filters, regex, reusable query profiles, record sampling, text/CSV export, exact record/level counts, timestamp timelines, estimated frequent field values, and follow mode with truncation and rotation detection. The TUI supports bounded result windows, viewport navigation, regex and Boolean quoted-literal search, source-line jumps and bookmarks, error/warning jumps, configurable physical context, formatted JSON zoom, field-value summaries, time histograms, filter edits, export, and live follow. Version 1.9.1 adds downloadable GUI bundles for Windows, Linux, and macOS. The latest stable release is [1.9.1](https://github.com/GIEI/GLogViewer/releases/tag/v1.9.1). See the [release notes](CHANGELOG.md), [user manual](docs/USER_MANUAL.md), and [known limits](docs/TECHNICAL_SPECIFICATION.md).
 
 ## Features
 
@@ -34,7 +34,21 @@ The CLI test suite has been reported passing on Windows, Linux, and macOS. Tests
 
 ### Optional desktop GUI
 
-The Nuklear desktop GUI is optional; the default CLI/TUI build has no SDL3 dependency. It provides Boolean search, field filters, raw/field/exclusion regex, custom parsing patterns, paged navigation over the complete matching result set, source-line jump, bookmarks, severity navigation, nearby context, formatted JSON, field-value summaries, a time histogram, text/CSV export with configurable columns, query profiles, and follow mode. The interface shows setup time, scan time, total ready time, and byte progress. Its log-explorer layout puts source and filters at the left, matching records in the center, and structured details at the right. Timestamp, level, and source columns can be toggled; the message column always remains visible and uses available space. Column visibility, context sizes, export settings, and window dimensions persist in per-user preferences. The detail pane has structured-field, raw-record, and context tabs. The GUI currently handles one file at a time and does not support Top/Bottom result limits. Version 1.9 adds Linux/macOS build and headless startup checks to the release workflow. Install the SDL3 development package before building it.
+The Nuklear desktop GUI is optional; the default CLI/TUI build has no SDL3 dependency. It provides Boolean search, field filters, raw/field/exclusion regex, custom parsing patterns, paged navigation over the complete matching result set, source-line jump, bookmarks, severity navigation, nearby context, formatted JSON, field-value summaries, a time histogram, text/CSV export with configurable columns, query profiles, and follow mode. The interface shows setup time, scan time, total ready time, and byte progress. Its log-explorer layout puts source and filters at the left, matching records in the center, and structured details at the right. Timestamp, level, and source columns can be toggled; the message column always remains visible and uses available space. Column visibility, context sizes, export settings, and window dimensions persist in per-user preferences. The detail pane has structured-field, raw-record, and context tabs. The GUI currently handles one file at a time and does not support Top/Bottom result limits. Downloadable GUI archives for Windows, Linux, and macOS are attached to the [latest release](https://github.com/GIEI/GLogViewer/releases/latest). They include the SDL3 runtime; Linux still relies on the system's graphics and audio libraries. Building the GUI from source requires SDL3 development files.
+
+For Windows, download and extract `logview-gui-windows-x86_64.zip`, then launch `logview-gui.exe` from the extracted folder. `SDL3.dll` is included beside the executable:
+
+```powershell
+.\logview-gui.exe C:\Logs\app.log --format auto
+```
+
+For Linux or macOS, download and extract the matching `logview-gui-*.tar.gz`, then launch it with the included script:
+
+```sh
+./run-logview-gui.sh /path/to/app.log --format syslog3164
+```
+
+The Linux archive includes the SDL3 shared library. The macOS archive targets Apple Silicon (arm64) and includes SDL3. The CLI/TUI archives remain separate and do not require SDL3.
 
 On Windows, `build.bat gui` looks for the SDL3 Visual C development package in `third_party\SDL3` and in the user's local temporary directory:
 
@@ -70,7 +84,7 @@ export LD_LIBRARY_PATH="$PWD/build/sdl3-prefix/lib${LD_LIBRARY_PATH:+:$LD_LIBRAR
 make gui
 ```
 
-The GUI scans and analyzes incrementally. A compact temporary disk index provides access to older results while memory remains bounded. Full-record and context views read source data on demand. Windows builds and a dummy-video live-scan check pass locally; CI now builds and startup-smoke-tests the GUI on Linux and macOS. Interactive testing on those desktops remains open. The GUI is a source build and is not included in CLI/TUI release archives. See the [desktop GUI implementation plan](docs/GUI_IMPLEMENTATION_PLAN.md) for implementation details and remaining work.
+The GUI scans and analyzes incrementally. A compact temporary disk index provides access to older results while memory remains bounded. Full-record and context views read source data on demand. CI builds, launches, packages, and checks the GUI archive on Windows, Linux, and macOS. Interactive testing on those desktops remains open. See the [desktop GUI implementation plan](docs/GUI_IMPLEMENTATION_PLAN.md) for implementation details and remaining work.
 
 GitHub Actions builds the project and runs the CLI suite on Windows, Linux, and macOS for pushes and pull requests. Large sample datasets are user-provided and are not included in the repository; CI runs the generated fixtures and scans sample files only when present.
 
@@ -137,6 +151,6 @@ All repository content and every source comment must be written in English. See 
 
 ## Status and license
 
-Status: stable version `1.9.0`. The tagged release workflow runs platform, sanitizer, packaging, and provenance checks before publishing. The optional desktop GUI requires SDL3; Windows builds are verified locally, and Linux/macOS builds and headless startup smoke tests run in CI. Interactive desktop checks and GUI packaging remain open. The existing [LICENSE](LICENSE) governs the repository.
+Status: stable version `1.9.1`. The tagged release workflow runs platform CLI/TUI tests, sanitizer checks, GUI builds and smoke tests, archive tests, and provenance checks before publishing. GUI release archives include the SDL3 runtime and its license notice. Interactive desktop checks remain open. The existing [LICENSE](LICENSE) governs GLogViewer; the GUI bundle also includes SDL3's license notice.
 
 See the [release process](docs/RELEASE_PROCESS.md) for the tag-based packaging workflow.

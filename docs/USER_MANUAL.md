@@ -1,6 +1,6 @@
 # User Manual
 
-**Status:** GLogViewer 1.9.0 adds Linux/macOS GUI builds and headless startup checks to CI. The optional GUI still requires SDL3 and is built separately from the CLI/TUI release archives. See the [release process](RELEASE_PROCESS.md).
+**Status:** GLogViewer 1.9.1 publishes optional GUI archives for Windows, Linux, and macOS. The GUI archives include SDL3; the CLI/TUI archives remain dependency-free. See the [release process](RELEASE_PROCESS.md).
 
 ## 1. What the tool will do
 
@@ -249,7 +249,17 @@ The `/` prompt accepts the built-in regex syntax or a Boolean search expression.
 
 ## 9. Desktop GUI
 
-The optional desktop interface uses Nuklear and SDL3. Build it separately from the dependency-free CLI/TUI.
+The optional desktop interface uses Nuklear and SDL3. Downloadable GUI archives include SDL3; the dependency-free CLI/TUI archives do not.
+
+Download the GUI archive for your platform from the [latest GitHub release](https://github.com/GIEI/GLogViewer/releases/latest). On Windows, extract `logview-gui-windows-x86_64.zip` and run `logview-gui.exe` from the extracted folder; `SDL3.dll` is next to the executable. On Linux or macOS, extract the matching tar archive and use its launcher script:
+
+```sh
+./run-logview-gui.sh /path/to/app.log --format syslog3164
+```
+
+The Linux archive is for x86_64 and includes SDL3; it still requires the host's graphics and audio runtime libraries. The macOS archive is for Apple Silicon (arm64) and includes SDL3. The archive also contains the SDL3 license notice.
+
+To build the GUI from source instead, install SDL3 development files first.
 
 On Windows, the build script finds an extracted SDL3 Visual C development package in `third_party\SDL3` or in the user's local temporary directory:
 

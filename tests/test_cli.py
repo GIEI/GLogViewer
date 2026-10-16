@@ -100,7 +100,7 @@ def main():
             "help should list the documented CLI features")
     version_result = run(binary, "--version")
     require(version_result.returncode == 0 and
-            version_result.stdout == b"logview 1.9.0\n",
+            version_result.stdout == b"logview 1.9.1\n",
             "version should print the program name and version")
     scratch_root = Path(__file__).resolve().parents[1] / "build" / "test-tmp"
     scratch_root.mkdir(parents=True, exist_ok=True)

@@ -1,12 +1,20 @@
 # Validation Notes
 
-**Status:** release validation evidence, 2026-10-16. The 1.9.0 tag-triggered workflow is configured to gate publication on clean CLI/TUI builds and tests on Windows, Linux, and macOS, GUI builds and startup checks on Linux/macOS, Linux sanitizers, package checks, and artifact attestations. The optional GUI is excluded from release archives. Windows GUI build and dummy-video scan checks pass locally; Linux/macOS jobs await their first run. Exploratory sample comparisons are observations, not release benchmarks unless explicitly identified below as the formal 1 GiB benchmark.
+**Status:** release validation evidence, 2026-10-16. The 1.9.1 tagged workflow gates publication on Windows/Linux/macOS CLI/TUI tests, GUI builds and startup checks on all three platforms, GUI archive contents, Linux sanitizers, and artifact attestations. GUI archives include SDL3 runtime files and license notices. Interactive GUI testing on target desktops remains open. Exploratory sample comparisons are observations, not release benchmarks unless explicitly identified below as the formal 1 GiB benchmark.
+
+## Version 1.9.1 release validation
+
+- Windows, Linux, and macOS GUI build and dummy-video scan checks are required before release publication.
+- GUI archive checks verify the executable, platform SDL3 runtime, SDL3 license notice, launch scripts, and executable permissions where applicable.
+- The CLI/TUI archives remain SDL3-free; existing platform test, sanitizer, checksum, and attestation gates continue to apply.
+- Interactive testing on additional Windows PCs and macOS systems remains with the project owner.
 
 ## Version 1.9.0 release validation
 
-- Windows GUI build and dummy-video scan smoke test pass locally after switching startup to `SDL_RunApp`.
-- The release workflow now requires Linux/macOS GUI build and headless startup smoke jobs, in addition to the existing platform CLI/TUI, sanitizer, packaging, and provenance gates.
-- Linux/macOS GUI CI results and the published release URL will be recorded after the tagged workflow completes.
+- Windows, Linux, and macOS CLI/TUI tests and Linux sanitizers passed in the tagged workflow.
+- Linux/macOS GUI build jobs exposed and fixed the missing `libm` link, then verified headless GUI startup and scanning.
+- The [1.9.0 release](https://github.com/GIEI/GLogViewer/releases/tag/v1.9.0) was published after its required workflow gates passed.
+- GUI application archives were not included in 1.9.0; their distribution is added in 1.9.1.
 
 ## Version 1.8.0 pre-release validation
 

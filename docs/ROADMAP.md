@@ -1,6 +1,6 @@
 # GLogViewer Product Roadmap
 
-**Status:** Version 1.9.0 is the current stable release. The tag-triggered workflow runs the Windows, Linux, and macOS CLI/TUI matrix, Linux/macOS GUI build and smoke checks, sanitizers, package checks, and provenance generation. This roadmap preserves release history and defines the next direction. See the [implementation plan](IMPLEMENTATION_PLAN.md) and [validation notes](VALIDATION.md).
+**Status:** Version 1.9.1 is the current stable release. The tag-triggered workflow tests Windows, Linux, and macOS CLI/TUI builds; builds and smoke-tests GUI packages on all three platforms; and runs sanitizers, archive checks, and provenance generation. This roadmap preserves release history and defines the next direction. See the [implementation plan](IMPLEMENTATION_PLAN.md) and [validation notes](VALIDATION.md).
 
 ## Product decision
 
@@ -35,14 +35,14 @@ Versions 1.2 through 1.8 are complete. Later milestones will evaluate additional
 | **1.6 Boolean TUI search** | Combine exact literal terms without escaping regex punctuation. | Quoted terms, `AND`/`OR`/`NOT`, parentheses, documented precedence, regex compatibility. | Released as 1.6.0; CI validates Windows, Linux, and macOS builds and tests. |
 | **1.7 Apache Error and desktop preview** | Inspect Apache server errors and explore logs in a desktop interface. | Apache Error parsing and statistics; optional Nuklear/SDL3 GUI with search, filters, paging, details, analysis, export, and follow. | CLI/TUI release gates pass on Windows, Linux, and macOS. Windows GUI build and live scan layout are verified; other GUI platforms remain open. |
 | **1.8 Desktop workflow improvements** | Reuse investigations and adapt the log table to the task. | GUI query profiles, configurable columns, persistent user preferences, RFC 3164 year/time-zone options, and layout fixes. | Windows GUI build and CLI/TUI release workflow pass; Linux/macOS GUI verification remains open. |
-| **1.9 Cross-platform GUI builds** | Build and launch the desktop GUI on Linux and macOS. | SDL platform-aware startup, SDL3 setup instructions, Linux/macOS GUI build jobs, and headless scan smoke checks. | Release publication waits for Linux/macOS GUI build and startup checks plus all existing release gates. |
+| **1.9 Cross-platform GUI distribution** | Download and launch the desktop GUI on Windows, Linux, and macOS. | SDL platform-aware startup, platform GUI archives with SDL3 runtime and license notice, platform launchers, and headless scan smoke checks. | Release publication waits for GUI builds, launch smoke tests, archive content checks, and all existing release gates. |
 | **1.x Format expansion** | Inspect more operational data with the same local workflow. | Compressed input and additional container formats, selected by demand and dependency review. | Format fixtures, malformed-input behavior, portability, license/dependency review, and large-file performance are documented before inclusion. |
 
-Version 1.9.0 adds Linux/macOS GUI build and startup checks. The GUI requires SDL3 and is not included in the CLI/TUI platform archives. See the [implementation plan](IMPLEMENTATION_PLAN.md) and [release changelog](../CHANGELOG.md).
+Version 1.9.0 added Linux/macOS GUI build and startup checks. Version 1.9.1 publishes separate GUI archives for Windows, Linux, and macOS, bundling SDL3 and its license notice. Linux still uses host graphics and audio libraries; the macOS archive targets Apple Silicon. See the [implementation plan](IMPLEMENTATION_PLAN.md) and [release changelog](../CHANGELOG.md).
 
 ## Desktop GUI
 
-The optional Nuklear/SDL3 GUI preview includes Boolean and regex search, structured filters, custom patterns, full-result paging, source-line jump, bookmarks, severity navigation, context, JSON formatting, field-value analysis, a time histogram, export, follow, and load timers. Windows build and scan layout checks pass; Linux/macOS build and headless scan checks are release workflow gates. Interactive visual tests, automated GUI behavior coverage, and GUI packaging remain planned. See the [desktop GUI implementation plan](GUI_IMPLEMENTATION_PLAN.md) for details.
+The optional Nuklear/SDL3 GUI includes Boolean and regex search, structured filters, custom patterns, full-result paging, source-line jump, bookmarks, severity navigation, context, JSON formatting, field-value analysis, a time histogram, export, follow, and load timers. Windows, Linux, and macOS builds, launch smoke tests, and GUI archive checks run in the release workflow. Interactive visual tests and automated GUI behavior coverage remain planned. See the [desktop GUI implementation plan](GUI_IMPLEMENTATION_PLAN.md) for details.
 
 Version 1.2 extends the 1.1 statistics and full-record inspection with focused field summaries, a navigable TUI histogram, and readable JSON presentation. It does not change source records or export content. See [implementation plan](IMPLEMENTATION_PLAN.md) for implementation and acceptance details.
 

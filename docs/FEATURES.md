@@ -1,6 +1,6 @@
 # Feature Catalogue and Product Positioning
 
-**Status:** Version 1.9.0 is the current stable release. It adds Linux/macOS GUI builds and headless startup checks to CI. Interactive desktop validation remains open. Exact behavior and known limits are specified in [Technical Specification](TECHNICAL_SPECIFICATION.md).
+**Status:** Version 1.9.1 is the current stable release. It publishes SDL3-bundled GUI archives for Windows, Linux, and macOS. Interactive desktop validation remains open. Exact behavior and known limits are specified in [Technical Specification](TECHNICAL_SPECIFICATION.md).
 
 ## 1. Users and jobs
 
@@ -37,7 +37,7 @@ Common application fields worth preserving are timestamp, severity, message, ser
 | Native journal/Event Log readers | Later | Inspect platform stores directly | Conflicts with a simple portable file-only v1. |
 | Kubernetes CRI parser | Implemented in 1.5 | Filter container stdout/stderr and inspect timestamps and fragment tags | One physical CRI row remains one record; `P`/`F` are exposed as tags. |
 | Apache Error parser | Implemented in 1.7 | Filter Apache server errors by timestamp, severity, module, and client address | Timezone-free timestamps are interpreted as UTC for statistics. Continuation lines remain raw records. |
-| Optional desktop GUI | Preview in 1.8 | Search, filter, page, inspect, analyze, export with custom CSV columns, follow logs, reuse query profiles, toggle table columns, retain per-user preferences, and configure RFC 3164 timestamps in a three-pane desktop interface | Requires SDL3; GUI remains single-file and does not yet support Top/Bottom result limits. Windows build verified locally; Linux/macOS build and dummy-video smoke checks run in CI. GUI packages are not yet available. |
+| Optional desktop GUI | Stable package in 1.9.1 | Search, filter, page, inspect, analyze, export with custom CSV columns, follow logs, reuse query profiles, toggle table columns, retain per-user preferences, and configure RFC 3164 timestamps in a three-pane desktop interface | Separate Windows, Linux, and macOS archives include SDL3 and its license notice. Linux still requires host display/audio libraries; macOS package targets arm64. GUI remains single-file and does not yet support Top/Bottom result limits. Interactive desktop checks remain open. |
 | Multiline event reconstruction, compressed input | Later | Reassemble fragments and inspect rotated/compressed archives | Needs explicit rules for partial records, rotation, and dependencies. |
 | Automatic template discovery | Research | Reduce custom-pattern setup | Related to [Drain](https://pinjiahe.github.io/files/pdf/research/ICWS17.pdf); not required for v1. |
 

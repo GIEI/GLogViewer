@@ -1,5 +1,22 @@
 # GLogViewer Changelog
 
+## 1.9.1 — 2026-10-16
+
+Adds downloadable desktop GUI bundles for Windows, Linux, and macOS.
+
+### Included
+
+- Publish platform GUI archives containing the application and the SDL3 runtime library.
+- Add launch scripts for Linux and macOS bundles and include SDL3's license notice.
+- Build, launch, package, and verify the GUI archive on all three CI platforms before release publication.
+- Keep the existing CLI/TUI archives and their dependency-free runtime unchanged.
+
+### Validation status
+
+- Release workflow builds and smoke-tests the GUI on Windows, Linux, and macOS.
+- GUI archive tests verify executable permissions, SDL3 runtime placement, launcher contents, and license inclusion.
+- Interactive GUI behavior remains subject to manual testing on target desktops.
+
 ## 1.9.0 — 2026-10-16
 
 Adds Linux and macOS build and startup verification for the optional desktop GUI.

@@ -20,12 +20,18 @@ jobs:
       fail-fast: false
       matrix:
         os:
+          - windows-2025
           - ubuntu-24.04
           - macos-15
 
     steps:
       - name: Check out GLogViewer
         uses: actions/checkout@v7
+
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.x"
 
       - name: Install Linux SDL build dependencies
         if: runner.os == 'Linux'
@@ -65,37 +71,97 @@ jobs:
         if: runner.os == 'macOS'
         run: brew install sdl3 pkgconf
 
+      - name: Install SDL3 on Windows
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          New-Item -ItemType Directory -Force "build" | Out-Null
+          $archive = "build\SDL3-devel.zip"
+          Invoke-WebRequest `
+            -Uri "https://github.com/libsdl-org/SDL/releases/download/release-3.4.18/SDL3-devel-3.4.18-VC.zip" `
+            -OutFile $archive
+          Expand-Archive -Path $archive -DestinationPath "build\SDL3-devel"
+          $header = Get-ChildItem "build\SDL3-devel" -Filter "SDL.h" -Recurse |
+            Where-Object { $_.FullName -match '\\include\\SDL3\\SDL\.h$' } |
+            Select-Object -First 1
+          if (-not $header) { throw "SDL3 development headers were not found in the archive." }
+          $env:SDL3_DIR = Split-Path -Parent (Split-Path -Parent (Split-Path -Parent $header.FullName))
+          "SDL3_DIR=$env:SDL3_DIR" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+
       - name: Build GUI
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          .\build.bat gui
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Build GUI on macOS and Linux
+        if: runner.os != 'Windows'
         run: make gui
 
-      - name: Smoke-test GUI startup and scan loop
+      - name: Bundle SDL3 on macOS
+        if: runner.os == 'macOS'
         run: |
-          mkdir -p build
-          printf '%s\n' 'Jun  4 15:16:01 host app[42]: startup' > build/gui-smoke.log
-          python3 - <<'PY'
-          import os
-          import subprocess
+          mkdir -p build/lib
+          sdl_runtime="$(brew --prefix sdl3)/lib/libSDL3.dylib"
+          cp "$sdl_runtime" build/lib/libSDL3.dylib
+          install_name_tool -id @rpath/libSDL3.dylib build/lib/libSDL3.dylib
+          sdl_link="$(otool -L build/logview-gui | awk '/libSDL3\.dylib/{print $1; exit}')"
+          test -n "$sdl_link"
+          install_name_tool -change "$sdl_link" @rpath/libSDL3.dylib build/logview-gui
+          install_name_tool -add_rpath @loader_path/lib build/logview-gui
 
-          environment = os.environ.copy()
-          environment["SDL_VIDEODRIVER"] = "dummy"
-          environment["GLOGVIEW_GUI_CAPTURE"] = "build/gui-smoke.bmp"
-          subprocess.run(
-              [
-                  "build/logview-gui",
-                  "build/gui-smoke.log",
-                  "--format",
-                  "syslog3164",
-                  "--syslog-year",
-                  "2026",
-                  "--syslog-timezone",
-                  "+02:00",
-              ],
-              check=True,
-              env=environment,
-              timeout=30,
-          )
-          PY
-          test -s build/gui-smoke.bmp
+      - name: Package GUI release archive on Windows
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: >-
+          python tests\package_release.py --platform windows --gui-only
+          --gui-binary build\logview-gui.exe
+          --gui-runtime build\SDL3.dll --output-directory dist-gui
+
+      - name: Package GUI release archive on macOS
+        if: runner.os == 'macOS'
+        run: >-
+          python3 tests/package_release.py --platform macos --gui-only
+          --gui-binary build/logview-gui
+          --gui-runtime build/lib/libSDL3.dylib
+          --output-directory dist-gui
+
+      - name: Package GUI release archive on Linux
+        if: runner.os == 'Linux'
+        run: |
+          sdl_runtime="$(find "$RUNNER_TEMP/sdl3" -name 'libSDL3.so.0' -print -quit)"
+          test -n "$sdl_runtime"
+          python3 tests/package_release.py --platform linux --gui-only \
+            --gui-binary build/logview-gui \
+            --gui-runtime "$sdl_runtime" \
+            --output-directory dist-gui
+
+      - name: Smoke-test packaged GUI on Windows
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force "build\gui-package-test" | Out-Null
+          Expand-Archive `
+            -Path "dist-gui\logview-gui-windows-x86_64.zip" `
+            -DestinationPath "build\gui-package-test" -Force
+          python tests\gui_smoke.py build\gui-package-test\logview-gui.exe
+
+      - name: Smoke-test packaged GUI on macOS and Linux
+        if: runner.os != 'Windows'
+        run: |
+          mkdir -p build/gui-package-test
+          tar -xzf dist-gui/logview-gui-*.tar.gz -C build/gui-package-test
+          python3 tests/gui_smoke.py build/gui-package-test/run-logview-gui.sh
+
+      - name: Upload GUI release archive
+        uses: actions/upload-artifact@v7
+        with:
+          name: release-package-gui-${{ matrix.os }}
+          path: dist-gui/*
+          if-no-files-found: error
+          retention-days: 14
 
   build-and-test:
     name: Build and test (${{ matrix.os }})
