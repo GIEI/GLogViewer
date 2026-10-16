@@ -1,6 +1,6 @@
 # Software Architecture
 
-**Status:** architecture for stable versions 1.0 through 1.7.0. Version 1.7 adds Apache Error parsing and an optional Nuklear/SDL3 desktop presentation layer. The GUI remains a Windows-verified preview; the core CLI/TUI has no SDL3 dependency. The behavioral contract is in [Technical Specification](TECHNICAL_SPECIFICATION.md), and validation evidence is in [Validation notes](VALIDATION.md).
+**Status:** architecture for stable versions 1.0 through 1.8.0. Version 1.7 added Apache Error parsing and an optional Nuklear/SDL3 desktop presentation layer; version 1.8 adds persisted GUI preferences, shared query-profile handling, and explicit RFC 3164 analysis settings. The core CLI/TUI has no SDL3 dependency. The behavioral contract is in [Technical Specification](TECHNICAL_SPECIFICATION.md), and validation evidence is in [Validation notes](VALIDATION.md).
 
 ## 1. Architectural goals
 
@@ -146,6 +146,7 @@ The core sees `platform_file_open`, `platform_file_seek64`, `platform_file_ident
 | 0.9–1.0 | Hardening, benchmark, documentation, release packaging | Published evidence for every 1.0 gate. |
 | 1.1 published | Lexical range filters, result windows, complete-record CLI inspection | Tagged release v1.1.0. |
 | 1.2 development complete | JSON pretty presentation, focused frequent-value statistics, navigable TUI histogram | Windows build and full local suite pass; Linux/macOS PTY, Linux sanitizers, and release packaging remain. |
+| 1.8 prepared | GUI query profiles, persistent preferences, configurable columns, and RFC 3164 analysis options | Windows CLI/sample suite, GUI build/help check, and release packaging tests pass locally; tag-triggered CI supplies cross-platform CLI/TUI gates. |
 
 The release history and future milestones are in the [product roadmap](ROADMAP.md); implementation sequence and acceptance criteria for upcoming releases are in the [implementation plan](IMPLEMENTATION_PLAN.md).
 

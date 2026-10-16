@@ -1,5 +1,24 @@
 # GLogViewer Changelog
 
+## 1.8.0 — 2026-10-16
+
+Improves desktop workflows and supports RFC 3164 timestamp settings from the GUI launcher.
+
+### Included
+
+- Load and save shared `GLOGVIEW_PROFILE 1` query profiles in the GUI, including format, custom pattern, filters, regexes, and context sizes.
+- Toggle Timestamp, Level, and Source columns while keeping Message visible; size columns from visible content and available table width.
+- Persist column visibility, context sizes, export format, and window dimensions in per-user GUI preferences.
+- Accept `--syslog-year YYYY` and `--syslog-timezone +/-HH:MM` in the GUI launcher for RFC 3164 histogram analysis; defaults remain the current year and UTC.
+- Improve GUI sidebar and bottom status layout so controls and both status lines remain visible within the window.
+- Keep the optional GUI source-only and independent from the CLI/TUI release binaries; GUI builds require SDL3.
+
+### Validation status
+
+- Windows GUI build with SDL3 3.4.18 succeeds; launcher help accepts the syslog options.
+- Windows CLI/TUI build, full sample suite, sanitizer checks, and cross-platform package validation are performed by the tag-triggered release workflow.
+- Linux and macOS GUI builds and interactive validation remain open; GUI is not included in the platform release archives.
+
 ## 1.7.0 — 2026-10-15
 
 Adds Apache Error log support and an optional desktop GUI preview.

@@ -1,6 +1,6 @@
 # GLogViewer Implementation Plan
 
-**Status:** Version 1.7.0 adds Apache Error log parsing and an optional Windows-verified desktop GUI preview. The CLI/TUI release gate runs the Windows, Linux, and macOS test matrix, Linux sanitizers, and cross-platform package checks. GUI builds on Linux and macOS remain open. All project content and code comments follow the English-only policy in [AGENTS.md](../AGENTS.md).
+**Status:** Version 1.8.0 improves the optional desktop GUI with reusable query profiles, persistent display preferences, and RFC 3164 timestamp settings. The CLI/TUI release gate runs the Windows, Linux, and macOS test matrix, Linux sanitizers, and cross-platform package checks. GUI builds on Linux and macOS remain open. All project content and code comments follow the English-only policy in [AGENTS.md](../AGENTS.md).
 
 ## Product goals
 
@@ -141,6 +141,22 @@ Version 1.1 provides bounded streaming, JSON and text formats, named parsers, fi
 - Windows GUI build with SDL3 3.4.18 succeeds; a live 1 GiB scan capture confirms that status, timing, record counts, and cancellation remain visible.
 - Linux and macOS GUI builds and interactive validation are deferred; CI release gates cover the CLI/TUI on all three platforms.
 
+## Release 1.8: desktop workflow improvements
+
+### Implemented work
+
+- Load and save the shared versioned query profile format from the GUI, covering parser, field filter, regex, exclusion regex, and context settings.
+- Let users show or hide timestamp, level, and source columns while retaining the message column and sizing visible columns to the available table width.
+- Persist column visibility, context sizes, export format, and window dimensions in per-user preferences.
+- Accept `--syslog-year` and `--syslog-timezone` in the GUI launcher so RFC 3164 timestamps can be interpreted in the histogram with explicit settings.
+- Keep the status panel anchored within the window while preserving room for sidebar controls.
+
+### Release evidence
+
+- Windows GUI build with SDL3 3.4.18 succeeds; `--help` and valid RFC 3164 launch options are accepted.
+- The GUI remains a source preview and is excluded from CLI/TUI release archives. Linux/macOS GUI builds and interactive checks remain open.
+- The tag-triggered release workflow runs the CLI/TUI platform matrix, Linux sanitizers, package checks, and provenance generation.
+
 ## Later candidates
 
 Compressed input, multi-line event reconstruction, and persistent indexes are candidates rather than commitments. Evaluate each against user demand, portability, input safety, licensing, implementation cost, and measured benefit. A persistent index must detect file replacement or modification and recover without returning stale results. Automatic log-template discovery remains research work and should not delay the core local investigation workflow.
@@ -155,4 +171,4 @@ Compressed input, multi-line event reconstruction, and persistent indexes are ca
 
 ## Desktop GUI preview
 
-The optional Nuklear/SDL3 desktop GUI preview is included in 1.7.0 source. The CLI/TUI builds remain independent of SDL3. Windows GUI build and scan layout checks pass; macOS/Linux GUI verification, visual interaction checks, and packaging remain open. See the [desktop GUI implementation plan](GUI_IMPLEMENTATION_PLAN.md) for current scope and remaining work.
+The optional Nuklear/SDL3 desktop GUI is included in source. Version 1.8 adds query profiles, persistent preferences, configurable columns, and RFC 3164 analysis options. The CLI/TUI builds remain independent of SDL3. Windows GUI builds pass; macOS/Linux GUI verification, visual interaction checks, and packaging remain open. See the [desktop GUI implementation plan](GUI_IMPLEMENTATION_PLAN.md) for current scope and remaining work.

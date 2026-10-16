@@ -1,6 +1,6 @@
 # GLogViewer Desktop GUI Implementation Plan
 
-**Status:** The Windows GUI preview implements the TUI investigation workflows and is built with Nuklear 4.13.3 and SDL3 3.4.18. Its MSVC build, dummy-video live-scan capture, and Windows visual layout review pass. Linux/macOS GUI builds, interactive control checks, packaging, and automated GUI behavior coverage remain future release gates.
+**Status:** The Windows GUI preview implements the TUI investigation workflows and is built with Nuklear 4.13.3 and SDL3 3.4.18. Version 1.8 adds shared query profiles, persistent preferences, configurable columns, and RFC 3164 timestamp options. Its MSVC build and dummy-video live-scan capture pass. Linux/macOS GUI builds, interactive control checks, packaging, and automated GUI behavior coverage remain future release gates.
 
 ## 1. Goals
 
@@ -28,7 +28,7 @@ The first prototype vendors Nuklear release `v4.13.3` at commit `a53ad2c65815107
 The current desktop implementation includes:
 
 - Open one log file and show its path, format, scan progress, and errors.
-- A virtualized record table with horizontal scrolling, column sizing, severity color, and a selected-row highlight.
+- A virtualized record table with horizontal scrolling, content-aware column sizing, optional timestamp/level/source columns, severity color, and a selected-row highlight.
 - Search supporting Boolean queries, raw regex, field regex, exclusion regex, field filters, and custom parsing patterns.
 - Quick severity filters for TRACE, DEBUG, INFO, NOTICE, WARN, ERROR, and OTHER; changing them starts a fresh bounded scan.
 - Disk-indexed pages across the complete matching result set, source-line jump, bookmarks, and error/warning navigation.
@@ -36,7 +36,7 @@ The current desktop implementation includes:
 - Field-value summaries, a UTC time histogram, text/CSV export, and file follow.
 - Cancel controls, byte progress, setup/scan/ready timers, and contextual help.
 
-Remaining work focuses on cross-platform GUI verification, automated interaction coverage, packaging, multi-file workflows, saved GUI query profiles, configurable columns, and accessibility improvements.
+Remaining work focuses on cross-platform GUI verification, automated interaction coverage, packaging, multi-file workflows, sorting, and accessibility improvements.
 
 ## 4. Architecture
 
@@ -70,7 +70,7 @@ Scanning should advance in bounded work slices from the desktop event loop in th
 - Re-read a selected row from its source offset and display the complete record in 1 KiB pages, while showing parsed timestamp, level, and message fields when available.
 - Provide source-line jump, bookmarks, severity navigation, nearby context, formatted JSON, field-value analysis, time histogram, and follow mode.
 - Export the active query result set to text or CSV through a second incremental scan; export paths use UTF-8 on Windows.
-- The GUI remains single-file. Persistent query profiles and configurable columns are not implemented.
+- The GUI remains single-file. Query profiles can load and save the shared `GLOGVIEW_PROFILE 1` format. Timestamp, level, and source column visibility, context sizes, export format, and window size persist in a separate per-user preferences file; message is always visible.
 
 **Current verification:** MSVC GUI build succeeds with SDL3 3.4.18, and the dummy-video scan smoke test stays active while processing a JSON Lines sample. The Windows CLI test suite passes across all 16 files in `SAMPLES`. GUI controls, analysis results, follow rotation, visual layout, and large-file memory still need interactive verification. macOS/Linux GUI builds and runtime behavior remain unverified.
 
@@ -116,12 +116,12 @@ The scan uses work slices of up to 80 ms, disables renderer VSync while scanning
 
 ### Phase 3: investigation and analysis views
 
-**Status:** Bookmarks, context, severity navigation, field-value summaries, time histogram, and follow controls are implemented. Saved GUI query profiles, configurable columns, and deterministic automated GUI coverage remain open.
+**Status:** Bookmarks, context, severity navigation, field-value summaries, time histogram, follow controls, saved query profiles, and persistent GUI preferences are implemented. Deterministic automated GUI coverage remains open.
 
-- Add bookmarks and saved query profiles using the current profile format.
+- Add bookmarks and saved query profiles using the current profile format. The GUI loads and saves format, custom pattern, field filter, raw regex, field regex, excluded regex, and context sizes; unsupported GUI-only state such as the Boolean search box and severity toggles is not part of the shared profile format.
 - Add field-value summaries and a clearly labeled time histogram; clicking a bucket opens its matching records.
 - Validate follow behavior for appended records, incomplete lines, truncation, and rotation on all supported platforms.
-- Add column selection, sorting only where it can be supported without loading the full file, and user preferences.
+- Add sorting only where it can be supported without loading the full file.
 
 **Gate:** every new action uses the same session selection semantics as CLI/TUI and has deterministic automated coverage.
 

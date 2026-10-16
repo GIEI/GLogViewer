@@ -1,6 +1,13 @@
 # Validation Notes
 
-**Status:** release validation evidence, 2026-10-15. The 1.7.0 tag-triggered workflow is the release gate for Apache Error parsing and runs clean CLI/TUI builds and tests on Windows, Linux, and macOS, package checks, Linux sanitizers, and artifact attestations. The optional GUI is verified on Windows only and is excluded from release archives. Exploratory sample comparisons are observations, not release benchmarks unless explicitly identified below as the formal 1 GiB benchmark.
+**Status:** release validation evidence, 2026-10-16. The 1.8.0 tag-triggered workflow is the release gate for clean CLI/TUI builds and tests on Windows, Linux, and macOS, package checks, Linux sanitizers, and artifact attestations. The optional GUI is verified on Windows only and is excluded from release archives. Exploratory sample comparisons are observations, not release benchmarks unless explicitly identified below as the formal 1 GiB benchmark.
+
+## Version 1.8.0 pre-release validation
+
+- Windows MSVC CLI build and full CLI/sample suite pass locally; all 16 regular files in `SAMPLES` were scanned.
+- Windows GUI build succeeds with SDL3 3.4.18. The launcher reports the new syslog options and accepts `--syslog-year 2026 --syslog-timezone +02:00` with `--help`.
+- Release archive packaging tests pass locally. The tag-triggered workflow remains responsible for Linux/macOS CLI/TUI tests, Linux sanitizers, package builds, checksums, and provenance.
+- Linux/macOS GUI builds and interactive GUI checks remain open; the GUI is not included in release archives.
 
 ## Version 1.7.0 pre-release validation
 

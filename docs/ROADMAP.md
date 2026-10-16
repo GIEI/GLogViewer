@@ -1,6 +1,6 @@
 # GLogViewer Product Roadmap
 
-**Status:** Version 1.7.0 is the current stable release. The tag-triggered workflow runs the Windows, Linux, and macOS CLI/TUI test matrix, sanitizer, package, and provenance checks. This roadmap preserves release history and defines the next direction. See the [implementation plan](IMPLEMENTATION_PLAN.md) and [validation notes](VALIDATION.md).
+**Status:** Version 1.8.0 is the current stable release. The tag-triggered workflow runs the Windows, Linux, and macOS CLI/TUI test matrix, sanitizer, package, and provenance checks. This roadmap preserves release history and defines the next direction. See the [implementation plan](IMPLEMENTATION_PLAN.md) and [validation notes](VALIDATION.md).
 
 ## Product decision
 
@@ -24,7 +24,7 @@ The numbers identify capability milestones, not calendar dates. A stage is compl
 
 ## Recent milestones and post-1.3 roadmap
 
-Versions 1.2 through 1.7 are complete. Later milestones will evaluate additional formats. Each CLI/TUI release is complete only when its exit gate passes on Windows, Linux, and macOS.
+Versions 1.2 through 1.8 are complete. Later milestones will evaluate additional formats. Each CLI/TUI release is complete only when its exit gate passes on Windows, Linux, and macOS.
 
 | Release | User-visible outcome | Main additions | Exit gate |
 | --- | --- | --- | --- |
@@ -34,9 +34,11 @@ Versions 1.2 through 1.7 are complete. Later milestones will evaluate additional
 | **1.5 Container log support** | Filter Kubernetes container logs without a custom pattern. | CRI parser, auto-detection, stream/tag/message fields, RFC 3339 Nano statistics. | Released as 1.5.0; owner reports the full test suite passes on Windows, Linux, and macOS. |
 | **1.6 Boolean TUI search** | Combine exact literal terms without escaping regex punctuation. | Quoted terms, `AND`/`OR`/`NOT`, parentheses, documented precedence, regex compatibility. | Released as 1.6.0; CI validates Windows, Linux, and macOS builds and tests. |
 | **1.7 Apache Error and desktop preview** | Inspect Apache server errors and explore logs in a desktop interface. | Apache Error parsing and statistics; optional Nuklear/SDL3 GUI with search, filters, paging, details, analysis, export, and follow. | CLI/TUI release gates pass on Windows, Linux, and macOS. Windows GUI build and live scan layout are verified; other GUI platforms remain open. |
+| **1.8 Desktop workflow improvements** | Reuse investigations and adapt the log table to the task. | GUI query profiles, configurable columns, persistent user preferences, RFC 3164 year/time-zone options, and layout fixes. | Windows GUI build and CLI/TUI release workflow pass; Linux/macOS GUI verification remains open. |
+| **1.8 Desktop workflow improvements** | Reuse investigations and adapt the log table to the task. | GUI query profiles, configurable columns, persistent user preferences, RFC 3164 year/time-zone options, and layout fixes. | Windows GUI build and CLI/TUI release workflow pass; Linux/macOS GUI verification remains open. |
 | **1.x Format expansion** | Inspect more operational data with the same local workflow. | Compressed input and additional container formats, selected by demand and dependency review. | Format fixtures, malformed-input behavior, portability, license/dependency review, and large-file performance are documented before inclusion. |
 
-Version 1.7.0 includes Apache Error parsing and a Windows-verified desktop GUI preview, along with Boolean TUI search, query profiles, bookmarks, multi-file analysis, and Kubernetes CRI support. The GUI requires SDL3 and is not included in the CLI/TUI platform archives. See the [implementation plan](IMPLEMENTATION_PLAN.md) and [release changelog](../CHANGELOG.md).
+Version 1.8.0 includes the desktop workflow improvements described above, Apache Error parsing, Boolean TUI search, query profiles, bookmarks, multi-file analysis, and Kubernetes CRI support. The GUI requires SDL3 and is not included in the CLI/TUI platform archives. See the [implementation plan](IMPLEMENTATION_PLAN.md) and [release changelog](../CHANGELOG.md).
 
 ## Desktop GUI
 

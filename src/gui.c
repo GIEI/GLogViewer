@@ -44,6 +44,7 @@
 #define GUI_CONTEXT_SIDE_MAX 100
 #define GUI_CONTEXT_ROWS (GUI_CONTEXT_SIDE_MAX * 2 + 1)
 #define GUI_PREVIEW_CAPACITY 320
+#define GUI_PROFILE_VALUE_CAPACITY 4096
 #define GUI_DETAIL_PAGE_BYTES 1024u
 #define GUI_SCAN_BUDGET_NS 16000000u
 #define GUI_SCAN_BUDGET_ROWS 4096u
@@ -122,6 +123,7 @@ typedef struct {
     char jump_text[32];
     char error[256];
     char status[256];
+    char preferences_path[GUI_PATH_CAPACITY];
     FILE *input;
     FILE *result_index;
     GuiIndexEntry result_index_buffer[GUI_RESULT_INDEX_BUFFER];
@@ -169,6 +171,13 @@ typedef struct {
     size_t detail_page;
     uint64_t detail_sequence;
     int detail_loaded;
+    int show_timestamp_column;
+    int show_level_column;
+    int show_source_column;
+    unsigned syslog_year;
+    int syslog_timezone_offset_seconds;
+    int window_width;
+    int window_height;
     uint64_t physical_records;
     uint64_t selected_records;
     uint64_t selected_sequence;
@@ -193,7 +202,7 @@ typedef struct {
     int scanning;
     int scan_complete;
     int open_dialog_pending;
-    int dialog_is_save;
+    int dialog_action;
     int exporting;
     uint64_t view_start;
     uint64_t page_load_next;
@@ -263,6 +272,7 @@ static const InputFormat format_values[] = {
 static const char *const export_names[] = {"Text export", "CSV export"};
 
 static GuiRow *cached_row(GuiApp *app, uint64_t sequence);
+static void start_scan(GuiApp *app);
 static void start_enrichment(GuiApp *app);
 static void request_page(GuiApp *app, uint64_t start);
 static void clear_detail(GuiApp *app);
@@ -293,6 +303,37 @@ static const char *format_label(InputFormat format)
 static void set_error(GuiApp *app, const char *message)
 {
     SDL_strlcpy(app->error, message, sizeof(app->error));
+}
+
+static int parse_gui_unsigned(const char *text, unsigned maximum,
+                              unsigned *value)
+{
+    char *end = NULL;
+    unsigned long parsed;
+    errno = 0;
+    parsed = strtoul(text, &end, 10);
+    if (errno != 0 || end == text || *end != '\0' || parsed > maximum)
+        return 0;
+    *value = (unsigned)parsed;
+    return 1;
+}
+
+static int parse_gui_timezone(const char *text, int *offset_seconds)
+{
+    int sign;
+    unsigned hours;
+    unsigned minutes;
+    char hour_text[3];
+    char minute_text[3];
+    if (text == NULL || strlen(text) != 6 ||
+        (text[0] != '+' && text[0] != '-') || text[3] != ':') return 0;
+    hour_text[0] = text[1]; hour_text[1] = text[2]; hour_text[2] = '\0';
+    minute_text[0] = text[4]; minute_text[1] = text[5]; minute_text[2] = '\0';
+    if (!parse_gui_unsigned(hour_text, 23, &hours) ||
+        !parse_gui_unsigned(minute_text, 59, &minutes)) return 0;
+    sign = text[0] == '-' ? -1 : 1;
+    *offset_seconds = sign * (int)(hours * 3600u + minutes * 60u);
+    return 1;
 }
 
 static int parse_gui_record(GuiApp *app, LogEntry *entry,
@@ -442,6 +483,383 @@ static FILE *open_utf8_file(const char *path)
 #else
     return fopen(path, "rb");
 #endif
+}
+
+static FILE *open_utf8_file_mode(const char *path, const char *mode)
+{
+#ifdef _WIN32
+    int wide_length;
+    wchar_t *wide_path;
+    wchar_t wide_mode[4];
+    size_t mode_length = strlen(mode);
+    FILE *file;
+    if (mode_length >= SDL_arraysize(wide_mode)) return NULL;
+    wide_length = MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS,
+                                      path, -1, NULL, 0);
+    if (wide_length <= 0) return NULL;
+    wide_path = (wchar_t *)malloc((size_t)wide_length * sizeof(*wide_path));
+    if (wide_path == NULL) return NULL;
+    if (MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, path, -1,
+                            wide_path, wide_length) <= 0) {
+        free(wide_path);
+        return NULL;
+    }
+    if (MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, mode, -1,
+                            wide_mode, (int)SDL_arraysize(wide_mode)) <= 0) {
+        free(wide_path);
+        return NULL;
+    }
+    file = _wfopen(wide_path, wide_mode);
+    free(wide_path);
+    return file;
+#else
+    return fopen(path, mode);
+#endif
+}
+
+static const char *gui_profile_format_name(InputFormat format)
+{
+    switch (format) {
+    case FORMAT_AUTO: return "auto";
+    case FORMAT_RAW: return "raw";
+    case FORMAT_JSONL: return "jsonl";
+    case FORMAT_SYSLOG3164: return "syslog3164";
+    case FORMAT_SYSLOG5424: return "syslog5424";
+    case FORMAT_CRI: return "cri";
+    case FORMAT_APACHE_COMMON: return "apache-common";
+    case FORMAT_APACHE_COMBINED: return "apache-combined";
+    case FORMAT_APACHE_ERROR: return "apache-error";
+    case FORMAT_NGINX_COMBINED: return "nginx-combined";
+    case FORMAT_CUSTOM: return "custom";
+    default: return NULL;
+    }
+}
+
+static int copy_profile_value(char *destination, size_t capacity,
+                              const char *value)
+{
+    size_t length = strlen(value);
+    if (length >= capacity || strchr(value, '\n') != NULL ||
+        strchr(value, '\r') != NULL) return 0;
+    memcpy(destination, value, length + 1);
+    return 1;
+}
+
+static int load_gui_profile(GuiApp *app, const char *path)
+{
+    FILE *file = open_utf8_file(path);
+    char line[GUI_PROFILE_VALUE_CAPACITY + 32];
+    char pattern[GUI_PATTERN_CAPACITY] = "";
+    char filter[GUI_FILTER_CAPACITY] = "";
+    char regex[GUI_REGEX_CAPACITY] = "";
+    char field_regex[GUI_REGEX_CAPACITY] = "";
+    char exclude_regex[GUI_REGEX_CAPACITY] = "";
+    InputFormat format = FORMAT_AUTO;
+    unsigned int seen = 0;
+    int line_number = 1;
+    int format_seen = 0;
+    size_t context_before = app->context_before;
+    size_t context_after = app->context_after;
+    if (file == NULL) {
+        SDL_snprintf(app->error, sizeof(app->error),
+                     "Cannot open query profile: %s", path);
+        return 0;
+    }
+    if (fgets(line, sizeof(line), file) == NULL) {
+        fclose(file);
+        SDL_snprintf(app->error, sizeof(app->error),
+                     "Unsupported query profile: %s", path);
+        return 0;
+    }
+    line[strcspn(line, "\r\n")] = '\0';
+    if (strcmp(line, "GLOGVIEW_PROFILE 1") != 0) {
+        fclose(file);
+        SDL_snprintf(app->error, sizeof(app->error),
+                     "Unsupported query profile: %s", path);
+        return 0;
+    }
+    while (fgets(line, sizeof(line), file) != NULL) {
+        char *separator;
+        char *value;
+        unsigned int bit;
+        size_t length = strlen(line);
+        line_number++;
+        if (length != 0 && line[length - 1] == '\n') line[--length] = '\0';
+        if (length != 0 && line[length - 1] == '\r') line[--length] = '\0';
+        if (strchr(line, '\n') != NULL || strchr(line, '\r') != NULL ||
+            (length == sizeof(line) - 1 && !feof(file))) goto invalid_profile;
+        if (line[0] == '\0') continue;
+        separator = strchr(line, '=');
+        if (separator == NULL) goto invalid_profile;
+        *separator = '\0';
+        value = separator + 1;
+        if (strcmp(line, "format") == 0) {
+            InputFormat parsed = parser_format_from_name(value);
+            bit = 1u << 0;
+            if ((int)parsed < 0) goto invalid_profile;
+            format = parsed;
+            format_seen = 1;
+        } else if (strcmp(line, "pattern") == 0) bit = 1u << 1;
+        else if (strcmp(line, "filter") == 0) bit = 1u << 2;
+        else if (strcmp(line, "regex") == 0) bit = 1u << 3;
+        else if (strcmp(line, "regex_field") == 0) bit = 1u << 4;
+        else if (strcmp(line, "exclude_regex") == 0) bit = 1u << 5;
+        else if (strcmp(line, "context_before") == 0) bit = 1u << 6;
+        else if (strcmp(line, "context_after") == 0) bit = 1u << 7;
+        else if (strcmp(line, "syslog_year") == 0 ||
+                 strcmp(line, "syslog_timezone") == 0) continue;
+        else goto invalid_profile;
+        if ((seen & bit) != 0) goto invalid_profile;
+        seen |= bit;
+        if (bit == (1u << 1) &&
+            !copy_profile_value(pattern, sizeof(pattern), value))
+            goto invalid_profile;
+        if (bit == (1u << 2) &&
+            !copy_profile_value(filter, sizeof(filter), value))
+            goto invalid_profile;
+        if (bit == (1u << 3) &&
+            !copy_profile_value(regex, sizeof(regex), value))
+            goto invalid_profile;
+        if (bit == (1u << 4) &&
+            !copy_profile_value(field_regex, sizeof(field_regex), value))
+            goto invalid_profile;
+        if (bit == (1u << 5) &&
+            !copy_profile_value(exclude_regex, sizeof(exclude_regex), value))
+            goto invalid_profile;
+        if (bit == (1u << 6) || bit == (1u << 7)) {
+            char *end = NULL;
+            unsigned long parsed;
+            errno = 0;
+            parsed = strtoul(value, &end, 10);
+            if (errno != 0 || end == value || *end != '\0' ||
+                parsed > GUI_CONTEXT_SIDE_MAX) goto invalid_profile;
+            if (bit == (1u << 6)) context_before = (size_t)parsed;
+            else context_after = (size_t)parsed;
+        }
+    }
+    if (ferror(file) || !format_seen) goto invalid_profile;
+    fclose(file);
+    app->selected_format = format;
+    SDL_strlcpy(app->custom_pattern, pattern, sizeof(app->custom_pattern));
+    SDL_strlcpy(app->filter_text, filter, sizeof(app->filter_text));
+    SDL_strlcpy(app->regex_text, regex, sizeof(app->regex_text));
+    SDL_strlcpy(app->field_regex_text, field_regex,
+                sizeof(app->field_regex_text));
+    SDL_strlcpy(app->exclude_regex_text, exclude_regex,
+                sizeof(app->exclude_regex_text));
+    app->context_before = context_before;
+    app->context_after = context_after;
+    app->search[0] = '\0';
+    app->severity_filter_active = 0;
+    app->severity_filter_mask = GUI_SEVERITY_ALL;
+    app->error[0] = '\0';
+    SDL_snprintf(app->status, sizeof(app->status),
+                 "Loaded query profile: %s", path);
+    if (app->path[0] != '\0' && !app->scanning && !app->exporting)
+        start_scan(app);
+    return 1;
+
+invalid_profile:
+    fclose(file);
+    SDL_snprintf(app->error, sizeof(app->error),
+                 "Invalid query profile on line %d: %s", line_number, path);
+    return 0;
+}
+
+static int save_gui_profile(GuiApp *app, const char *path)
+{
+    FILE *file;
+    const char *format = gui_profile_format_name(app->selected_format);
+    int failed;
+    if (app->path[0] != '\0' && output_paths_same_file(path, app->path)) {
+        SDL_strlcpy(app->error,
+                    "The query profile path must not be the active log file.",
+                    sizeof(app->error));
+        return 0;
+    }
+    file = open_utf8_file_mode(path, "wb");
+    if (file == NULL || format == NULL) {
+        if (file != NULL) fclose(file);
+        SDL_snprintf(app->error, sizeof(app->error),
+                     "Cannot write query profile: %s", path);
+        return 0;
+    }
+    failed = fprintf(file,
+        "GLOGVIEW_PROFILE 1\nformat=%s\npattern=%s\nfilter=%s\nregex=%s\nregex_field=%s\nexclude_regex=%s\nsyslog_year=0\nsyslog_timezone=\ncontext_before=%u\ncontext_after=%u\n",
+        format, app->custom_pattern, app->filter_text, app->regex_text,
+        app->field_regex_text, app->exclude_regex_text,
+        (unsigned)app->context_before, (unsigned)app->context_after) < 0;
+    if (fflush(file) != 0) failed = 1;
+    if (fclose(file) != 0) failed = 1;
+    if (failed) {
+        SDL_snprintf(app->error, sizeof(app->error),
+                     "Failed to finish query profile: %s", path);
+        return 0;
+    }
+    app->error[0] = '\0';
+    SDL_snprintf(app->status, sizeof(app->status),
+                 "Saved query profile: %s", path);
+    return 1;
+}
+
+static int prepare_preferences_path(GuiApp *app)
+{
+    char *directory = SDL_GetPrefPath("GIEI", "GLogViewer");
+    int length;
+    if (directory == NULL) return 0;
+    length = SDL_snprintf(app->preferences_path,
+                          sizeof(app->preferences_path),
+                          "%sgui-preferences.conf", directory);
+    SDL_free(directory);
+    if (length < 0 || (size_t)length >= sizeof(app->preferences_path)) {
+        app->preferences_path[0] = '\0';
+        return 0;
+    }
+    return 1;
+}
+
+static int parse_preference_boolean(const char *value, int *parsed)
+{
+    if (strcmp(value, "0") == 0) *parsed = 0;
+    else if (strcmp(value, "1") == 0) *parsed = 1;
+    else return 0;
+    return 1;
+}
+
+static int parse_preference_integer(const char *value, int minimum,
+                                    int maximum, int *parsed)
+{
+    char *end = NULL;
+    long number;
+    errno = 0;
+    number = strtol(value, &end, 10);
+    if (errno != 0 || end == value || *end != '\0' ||
+        number < minimum || number > maximum) return 0;
+    *parsed = (int)number;
+    return 1;
+}
+
+static void load_gui_preferences(GuiApp *app)
+{
+    FILE *file;
+    char line[128];
+    unsigned int seen = 0;
+    int show_timestamp = app->show_timestamp_column;
+    int show_level = app->show_level_column;
+    int show_source = app->show_source_column;
+    int context_before = (int)app->context_before;
+    int context_after = (int)app->context_after;
+    int export_format = (int)app->export_format;
+    int window_width = app->window_width;
+    int window_height = app->window_height;
+    int line_number = 1;
+    if (!prepare_preferences_path(app)) return;
+    file = open_utf8_file(app->preferences_path);
+    if (file == NULL) return;
+    if (fgets(line, sizeof(line), file) == NULL) goto invalid_preferences;
+    line[strcspn(line, "\r\n")] = '\0';
+    if (strcmp(line, "GLOGVIEW_GUI_PREFERENCES 1") != 0)
+        goto invalid_preferences;
+    while (fgets(line, sizeof(line), file) != NULL) {
+        char *separator;
+        char *value;
+        unsigned int bit;
+        size_t length = strlen(line);
+        int parsed;
+        line_number++;
+        if (length != 0 && line[length - 1] == '\n') line[--length] = '\0';
+        if (length != 0 && line[length - 1] == '\r') line[--length] = '\0';
+        if (length == sizeof(line) - 1 && !feof(file))
+            goto invalid_preferences;
+        if (strchr(line, '\r') != NULL || strchr(line, '\n') != NULL)
+            goto invalid_preferences;
+        if (line[0] == '\0') continue;
+        separator = strchr(line, '=');
+        if (separator == NULL) goto invalid_preferences;
+        *separator = '\0';
+        value = separator + 1;
+        if (strcmp(line, "show_timestamp") == 0) bit = 1u << 0;
+        else if (strcmp(line, "show_level") == 0) bit = 1u << 1;
+        else if (strcmp(line, "show_source") == 0) bit = 1u << 2;
+        else if (strcmp(line, "context_before") == 0) bit = 1u << 3;
+        else if (strcmp(line, "context_after") == 0) bit = 1u << 4;
+        else if (strcmp(line, "export_format") == 0) bit = 1u << 5;
+        else if (strcmp(line, "window_width") == 0) bit = 1u << 6;
+        else if (strcmp(line, "window_height") == 0) bit = 1u << 7;
+        else goto invalid_preferences;
+        if ((seen & bit) != 0) goto invalid_preferences;
+        seen |= bit;
+        if (bit == (1u << 0) &&
+            !parse_preference_boolean(value, &show_timestamp))
+            goto invalid_preferences;
+        if (bit == (1u << 1) &&
+            !parse_preference_boolean(value, &show_level))
+            goto invalid_preferences;
+        if (bit == (1u << 2) &&
+            !parse_preference_boolean(value, &show_source))
+            goto invalid_preferences;
+        if (bit == (1u << 3)) {
+            if (!parse_preference_integer(value, 0, GUI_CONTEXT_SIDE_MAX,
+                                          &parsed)) goto invalid_preferences;
+            context_before = parsed;
+        }
+        if (bit == (1u << 4)) {
+            if (!parse_preference_integer(value, 0, GUI_CONTEXT_SIDE_MAX,
+                                          &parsed)) goto invalid_preferences;
+            context_after = parsed;
+        }
+        if (bit == (1u << 5)) {
+            if (strcmp(value, "text") == 0) export_format = OUTPUT_TEXT;
+            else if (strcmp(value, "csv") == 0) export_format = OUTPUT_CSV;
+            else goto invalid_preferences;
+        }
+        if (bit == (1u << 6) &&
+            !parse_preference_integer(value, 960, 8192, &window_width))
+            goto invalid_preferences;
+        if (bit == (1u << 7) &&
+            !parse_preference_integer(value, 640, 8192, &window_height))
+            goto invalid_preferences;
+    }
+    if (ferror(file)) goto invalid_preferences;
+    fclose(file);
+    app->show_timestamp_column = show_timestamp;
+    app->show_level_column = show_level;
+    app->show_source_column = show_source;
+    app->context_before = (size_t)context_before;
+    app->context_after = (size_t)context_after;
+    app->export_format = (OutputFormat)export_format;
+    app->window_width = window_width;
+    app->window_height = window_height;
+    return;
+
+invalid_preferences:
+    fclose(file);
+    SDL_strlcpy(app->status,
+                "Invalid GUI preferences ignored; using defaults",
+                sizeof(app->status));
+}
+
+static void save_gui_preferences(GuiApp *app)
+{
+    FILE *file;
+    const char *export_format = app->export_format == OUTPUT_CSV ? "csv" : "text";
+    int width = app->window_width;
+    int height = app->window_height;
+    int write_error;
+    if (app->window != NULL) SDL_GetWindowSize(app->window, &width, &height);
+    if (!prepare_preferences_path(app)) return;
+    file = open_utf8_file_mode(app->preferences_path, "wb");
+    if (file == NULL) return;
+    write_error = fprintf(file,
+        "GLOGVIEW_GUI_PREFERENCES 1\nshow_timestamp=%d\nshow_level=%d\nshow_source=%d\ncontext_before=%u\ncontext_after=%u\nexport_format=%s\nwindow_width=%d\nwindow_height=%d\n",
+        app->show_timestamp_column, app->show_level_column,
+        app->show_source_column, (unsigned)app->context_before,
+        (unsigned)app->context_after, export_format, width, height) < 0;
+    if (fflush(file) != 0) write_error = 1;
+    if (fclose(file) != 0) write_error = 1;
+    if (write_error)
+        SDL_strlcpy(app->error, "Could not save GUI preferences",
+                    sizeof(app->error));
 }
 
 static void close_scan(GuiApp *app)
@@ -623,9 +1041,10 @@ static void start_analysis(GuiApp *app, int view)
     }
     now = time(NULL);
     local_time = localtime(&now);
-    config.syslog_year = local_time != NULL ?
-                         (unsigned)(local_time->tm_year + 1900) : 0;
-    config.syslog_timezone_offset_seconds = 0;
+    config.syslog_year = app->syslog_year != 0 ? app->syslog_year :
+        (local_time != NULL ? (unsigned)(local_time->tm_year + 1900) : 0);
+    config.syslog_timezone_offset_seconds =
+        app->syslog_timezone_offset_seconds;
     stats_set_timestamp_config(&app->analysis_stats, &config);
     app->analysis_input = open_utf8_file(app->path);
     if (app->analysis_input == NULL ||
@@ -2080,7 +2499,7 @@ static void show_open_dialog(GuiApp *app)
     };
     if (app->open_dialog_pending) return;
     app->open_dialog_pending = 1;
-    app->dialog_is_save = 0;
+    app->dialog_action = 0;
     SDL_ShowOpenFileDialog(file_dialog_callback, app, app->window, filters,
                            (int)SDL_arraysize(filters), NULL, false);
 }
@@ -2095,7 +2514,33 @@ static void show_save_dialog(GuiApp *app)
     if (app->open_dialog_pending || !app->scan_complete || app->scanning ||
         app->exporting) return;
     app->open_dialog_pending = 1;
-    app->dialog_is_save = 1;
+    app->dialog_action = 1;
+    SDL_ShowSaveFileDialog(file_dialog_callback, app, app->window, filters,
+                           (int)SDL_arraysize(filters), NULL);
+}
+
+static void show_profile_open_dialog(GuiApp *app)
+{
+    static const SDL_DialogFileFilter filters[] = {
+        {"GLogViewer query profiles", "glogprofile"},
+        {"All files", "*"}
+    };
+    if (app->open_dialog_pending || app->scanning || app->exporting) return;
+    app->open_dialog_pending = 1;
+    app->dialog_action = 2;
+    SDL_ShowOpenFileDialog(file_dialog_callback, app, app->window, filters,
+                           (int)SDL_arraysize(filters), NULL, false);
+}
+
+static void show_profile_save_dialog(GuiApp *app)
+{
+    static const SDL_DialogFileFilter filters[] = {
+        {"GLogViewer query profiles", "glogprofile"},
+        {"All files", "*"}
+    };
+    if (app->open_dialog_pending || app->scanning || app->exporting) return;
+    app->open_dialog_pending = 1;
+    app->dialog_action = 3;
     SDL_ShowSaveFileDialog(file_dialog_callback, app, app->window, filters,
                            (int)SDL_arraysize(filters), NULL);
 }
@@ -2167,11 +2612,45 @@ static void begin_result_table_row(GuiApp *app, float row_height,
                                    float source_width)
 {
     nk_layout_row_template_begin(app->nk, row_height);
-    nk_layout_row_template_push_static(app->nk, time_width);
-    nk_layout_row_template_push_static(app->nk, level_width);
-    nk_layout_row_template_push_static(app->nk, source_width);
+    if (app->show_timestamp_column)
+        nk_layout_row_template_push_static(app->nk, time_width);
+    if (app->show_level_column)
+        nk_layout_row_template_push_static(app->nk, level_width);
+    if (app->show_source_column)
+        nk_layout_row_template_push_static(app->nk, source_width);
     nk_layout_row_template_push_dynamic(app->nk);
     nk_layout_row_template_end(app->nk);
+}
+
+static nk_bool selectable_bookmark_label(GuiApp *app, const char *text,
+                                         nk_bool *selected, int bookmarked)
+{
+    nk_bool clicked;
+    if (!bookmarked)
+        return nk_selectable_label(app->nk, text, NK_TEXT_LEFT, selected);
+    nk_style_push_color(app->nk, &app->nk->style.selectable.text_normal,
+                        nk_rgb(187, 247, 208));
+    nk_style_push_color(app->nk, &app->nk->style.selectable.text_hover,
+                        nk_rgb(220, 252, 231));
+    nk_style_push_color(app->nk, &app->nk->style.selectable.text_pressed,
+                        nk_rgb(220, 252, 231));
+    nk_style_push_color(app->nk,
+                        &app->nk->style.selectable.text_normal_active,
+                        nk_rgb(187, 247, 208));
+    nk_style_push_color(app->nk,
+                        &app->nk->style.selectable.text_hover_active,
+                        nk_rgb(220, 252, 231));
+    nk_style_push_color(app->nk,
+                        &app->nk->style.selectable.text_pressed_active,
+                        nk_rgb(220, 252, 231));
+    clicked = nk_selectable_label(app->nk, text, NK_TEXT_LEFT, selected);
+    nk_style_pop_color(app->nk);
+    nk_style_pop_color(app->nk);
+    nk_style_pop_color(app->nk);
+    nk_style_pop_color(app->nk);
+    nk_style_pop_color(app->nk);
+    nk_style_pop_color(app->nk);
+    return clicked;
 }
 
 static void jump_to_source_line(GuiApp *app)
@@ -2315,12 +2794,15 @@ static void render_row_list(GuiApp *app)
             jump_to_source_line(app);
     }
     begin_result_table_row(app, 24, time_width, level_width, source_width);
-    nk_label_colored(app->nk, "Timestamp", NK_TEXT_LEFT,
-                     nk_rgb(177, 197, 220));
-    nk_label_colored(app->nk, "Level", NK_TEXT_LEFT,
-                     nk_rgb(177, 197, 220));
-    nk_label_colored(app->nk, "Source", NK_TEXT_LEFT,
-                     nk_rgb(177, 197, 220));
+    if (app->show_timestamp_column)
+        nk_label_colored(app->nk, "Timestamp", NK_TEXT_LEFT,
+                         nk_rgb(177, 197, 220));
+    if (app->show_level_column)
+        nk_label_colored(app->nk, "Level", NK_TEXT_LEFT,
+                         nk_rgb(177, 197, 220));
+    if (app->show_source_column)
+        nk_label_colored(app->nk, "Source", NK_TEXT_LEFT,
+                         nk_rgb(177, 197, 220));
     nk_label_colored(app->nk, "Message", NK_TEXT_LEFT,
                      nk_rgb(177, 197, 220));
     if (app->selected_records == 0) {
@@ -2339,54 +2821,44 @@ static void render_row_list(GuiApp *app)
                 char marked_time[64];
                 const char *time_text = row->timestamp[0] != '\0' ?
                                         row->timestamp : "-";
-                if (sequence_is_bookmarked(app, sequence))
+                int bookmarked = sequence_is_bookmarked(app, sequence);
+                if (bookmarked && app->show_timestamp_column)
                     SDL_snprintf(marked_time, sizeof(marked_time), "* %s", time_text);
                 else SDL_strlcpy(marked_time, time_text, sizeof(marked_time));
                 nk_bool clicked;
-                if (sequence_is_bookmarked(app, sequence)) {
-                    nk_style_push_color(app->nk,
-                        &app->nk->style.selectable.text_normal,
-                        nk_rgb(187, 247, 208));
-                    nk_style_push_color(app->nk,
-                        &app->nk->style.selectable.text_hover,
-                        nk_rgb(220, 252, 231));
-                    nk_style_push_color(app->nk,
-                        &app->nk->style.selectable.text_pressed,
-                        nk_rgb(220, 252, 231));
-                    nk_style_push_color(app->nk,
-                        &app->nk->style.selectable.text_normal_active,
-                        nk_rgb(187, 247, 208));
-                    nk_style_push_color(app->nk,
-                        &app->nk->style.selectable.text_hover_active,
-                        nk_rgb(220, 252, 231));
-                    nk_style_push_color(app->nk,
-                        &app->nk->style.selectable.text_pressed_active,
-                        nk_rgb(220, 252, 231));
-                    clicked = nk_selectable_label(
-                        app->nk, marked_time, NK_TEXT_LEFT, &selected);
-                    nk_style_pop_color(app->nk);
-                    nk_style_pop_color(app->nk);
-                    nk_style_pop_color(app->nk);
-                    nk_style_pop_color(app->nk);
-                    nk_style_pop_color(app->nk);
-                    nk_style_pop_color(app->nk);
+                if (app->show_timestamp_column) {
+                    clicked = selectable_bookmark_label(app, marked_time,
+                                                        &selected, bookmarked);
                 } else {
+                    clicked = nk_false;
+                }
+                if (app->show_level_column) {
+                    push_level_badge(app, row->level[0] != '\0' ?
+                                     row->level : "INFO");
+                    if (nk_button_label(app->nk,
+                        row->level[0] != '\0' ? row->level : "-")) {
+                        selected = nk_true;
+                        clicked = nk_true;
+                    }
+                    pop_level_badge(app);
+                }
+                if (app->show_source_column)
                     clicked = nk_selectable_label(
-                        app->nk, marked_time, NK_TEXT_LEFT, &selected);
+                        app->nk, row->source[0] != '\0' ? row->source : "-",
+                        NK_TEXT_LEFT, &selected) || clicked;
+                {
+                    char marked_message[GUI_PREVIEW_CAPACITY + 4];
+                    const char *message = row->message[0] != '\0' ?
+                                          row->message : row->raw;
+                    if (bookmarked && !app->show_timestamp_column) {
+                        SDL_snprintf(marked_message, sizeof(marked_message),
+                                     "* %s", message);
+                        message = marked_message;
+                    }
+                    clicked = selectable_bookmark_label(
+                        app, message, &selected,
+                        bookmarked && !app->show_timestamp_column) || clicked;
                 }
-                push_level_badge(app, row->level[0] != '\0' ? row->level : "INFO");
-                if (nk_button_label(app->nk,
-                                    row->level[0] != '\0' ? row->level : "-")) {
-                    selected = nk_true;
-                    clicked = nk_true;
-                }
-                pop_level_badge(app);
-                clicked = nk_selectable_label(
-                    app->nk, row->source[0] != '\0' ? row->source : "-",
-                    NK_TEXT_LEFT, &selected) || clicked;
-                clicked = nk_selectable_label(
-                    app->nk, row->message[0] != '\0' ? row->message : row->raw,
-                    NK_TEXT_LEFT, &selected) || clicked;
                 if (clicked) {
                     app->selected_sequence = sequence;
                     app->has_selection = 1;
@@ -2831,6 +3303,32 @@ static void render_sidebar(GuiApp *app)
         }
     }
 
+    if (nk_tree_push(app->nk, NK_TREE_NODE, "Visible columns", NK_MINIMIZED)) {
+        nk_bool show_timestamp = app->show_timestamp_column ? nk_true : nk_false;
+        nk_bool show_level = app->show_level_column ? nk_true : nk_false;
+        nk_bool show_source = app->show_source_column ? nk_true : nk_false;
+        int columns_changed = 0;
+        nk_layout_row_dynamic(app->nk, 24, 2);
+        if (nk_checkbox_label(app->nk, "Timestamp", &show_timestamp)) {
+            app->show_timestamp_column = show_timestamp != nk_false;
+            columns_changed = 1;
+        }
+        if (nk_checkbox_label(app->nk, "Level", &show_level)) {
+            app->show_level_column = show_level != nk_false;
+            columns_changed = 1;
+        }
+        nk_layout_row_dynamic(app->nk, 24, 2);
+        if (nk_checkbox_label(app->nk, "Source", &show_source)) {
+            app->show_source_column = show_source != nk_false;
+            columns_changed = 1;
+        }
+        nk_label(app->nk, "Message is always shown", NK_TEXT_LEFT);
+        if (columns_changed)
+            SDL_strlcpy(app->status, "Visible columns updated",
+                        sizeof(app->status));
+        nk_tree_pop(app->nk);
+    }
+
     nk_layout_row_dynamic(app->nk, 20, 1);
     nk_label_colored(app->nk, "Field filter", NK_TEXT_LEFT,
                      nk_rgb(163, 181, 202));
@@ -2879,6 +3377,12 @@ static void render_sidebar(GuiApp *app)
     if (nk_button_label(app->nk, "Export")) show_save_dialog(app);
     if (nk_button_label(app->nk, "Clear queries") && !app->scanning)
         clear_all_queries(app);
+    sidebar_section_title(app, "Query profile");
+    nk_layout_row_dynamic(app->nk, 30, 2);
+    if (nk_button_label(app->nk, "Load profile"))
+        show_profile_open_dialog(app);
+    if (nk_button_label(app->nk, "Save profile"))
+        show_profile_save_dialog(app);
     nk_layout_row_dynamic(app->nk, 27, 1);
     follow_toggle = app->follow_enabled ? nk_true : nk_false;
     if (nk_checkbox_label(app->nk, "Follow file", &follow_toggle)) {
@@ -2965,7 +3469,7 @@ static void build_ui(GuiApp *app)
         nk_layout_row_end(app->nk);
 
         if (width >= 1180) {
-            float body_height = (float)(height - 150);
+            float body_height = (float)(height - 124);
             if (body_height < 180.0f) body_height = 180.0f;
             nk_layout_row_template_begin(app->nk, body_height);
             nk_layout_row_template_push_static(app->nk,
@@ -3038,7 +3542,7 @@ static void build_ui(GuiApp *app)
                 render_details(app);
             }
         } else {
-            float body_height = (float)(height - 150);
+            float body_height = (float)(height - 124);
             if (body_height < 180.0f) body_height = 180.0f;
             nk_layout_row_dynamic(app->nk, body_height * 0.3f, 1);
             render_sidebar(app);
@@ -3153,7 +3657,7 @@ static void SDLCALL file_dialog_callback(void *userdata,
     }
     SDL_zero(event);
     event.type = app->file_event;
-    event.user.code = app->dialog_is_save ? 1 : 0;
+    event.user.code = app->dialog_action;
     event.user.data1 = path;
     if (!SDL_PushEvent(&event)) SDL_free(path);
 }
@@ -3165,6 +3669,10 @@ static void process_event(GuiApp *app, SDL_Event *event)
         if (path != NULL) {
             if (event->user.code == 1) {
                 start_export(app, path);
+            } else if (event->user.code == 2) {
+                load_gui_profile(app, path);
+            } else if (event->user.code == 3) {
+                save_gui_profile(app, path);
             } else {
                 SDL_strlcpy(app->path, path, sizeof(app->path));
                 start_scan(app);
@@ -3209,7 +3717,9 @@ static int gui_run(GuiApp *app)
                 SDL_GetError());
         return 2;
     }
-    if (!SDL_CreateWindowAndRenderer("GLogViewer", 1440, 920,
+    load_gui_preferences(app);
+    if (!SDL_CreateWindowAndRenderer("GLogViewer", app->window_width,
+                                     app->window_height,
                                      SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIGH_PIXEL_DENSITY,
                                      &app->window, &app->renderer)) {
         fprintf(stderr, "logview-gui: cannot create the application window: %s\n",
@@ -3295,6 +3805,7 @@ static int gui_run(GuiApp *app)
     }
 
 cleanup:
+    save_gui_preferences(app);
     close_export(app);
     close_analysis(app);
     close_level_navigation(app);
@@ -3322,7 +3833,12 @@ int main(int argc, char **argv)
     memset(&app, 0, sizeof(app));
     app.context_before = 5;
     app.context_after = 5;
+    app.window_width = 1440;
+    app.window_height = 920;
     app.selected_format = FORMAT_AUTO;
+    app.show_timestamp_column = 1;
+    app.show_level_column = 1;
+    app.show_source_column = 1;
     SDL_strlcpy(app.status, "Open a log file or enter its path",
                 sizeof(app.status));
 
@@ -3330,7 +3846,23 @@ int main(int argc, char **argv)
         if (strcmp(argv[index], "--format") == 0 && index + 1 < argc) {
             app.selected_format = parser_format_from_name(argv[++index]);
             if ((int)app.selected_format < 0) {
-                fputs("Usage: logview-gui [file] [--format FORMAT] [--pattern PATTERN] [--filter EXPRESSION]\n", stderr);
+                fputs("Usage: logview-gui [file] [--format FORMAT] [--pattern PATTERN] [--filter EXPRESSION] [--syslog-year YYYY] [--syslog-timezone +/-HH:MM]\n", stderr);
+                return 3;
+            }
+        } else if (strcmp(argv[index], "--syslog-year") == 0 &&
+                   index + 1 < argc) {
+            if (!parse_gui_unsigned(argv[++index], 9999, &app.syslog_year) ||
+                app.syslog_year == 0) {
+                fputs("logview-gui: --syslog-year requires a year from 1 to 9999\n",
+                      stderr);
+                return 3;
+            }
+        } else if (strcmp(argv[index], "--syslog-timezone") == 0 &&
+                   index + 1 < argc) {
+            if (!parse_gui_timezone(argv[++index],
+                                    &app.syslog_timezone_offset_seconds)) {
+                fputs("logview-gui: --syslog-timezone must use +/-HH:MM\n",
+                      stderr);
                 return 3;
             }
         } else if (strcmp(argv[index], "--pattern") == 0 && index + 1 < argc) {
@@ -3340,11 +3872,12 @@ int main(int argc, char **argv)
             SDL_strlcpy(app.filter_text, argv[++index],
                         sizeof(app.filter_text));
         } else if (strcmp(argv[index], "--help") == 0) {
-            puts("Usage: logview-gui [file] [--format FORMAT] [--pattern PATTERN] [--filter EXPRESSION]");
+            puts("Usage: logview-gui [file] [--format FORMAT] [--pattern PATTERN] [--filter EXPRESSION] [--syslog-year YYYY] [--syslog-timezone +/-HH:MM]");
             puts("Open a log in the optional Nuklear desktop interface.");
+            puts("--syslog-year and --syslog-timezone configure RFC 3164 timestamp analysis.");
             return 0;
         } else if (argv[index][0] == '-') {
-            fputs("Usage: logview-gui [file] [--format FORMAT] [--pattern PATTERN] [--filter EXPRESSION]\n", stderr);
+            fputs("Usage: logview-gui [file] [--format FORMAT] [--pattern PATTERN] [--filter EXPRESSION] [--syslog-year YYYY] [--syslog-timezone +/-HH:MM]\n", stderr);
             return 3;
         } else if (app.path[0] == '\0') {
             SDL_strlcpy(app.path, argv[index], sizeof(app.path));
