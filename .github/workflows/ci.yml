@@ -72,11 +72,29 @@ jobs:
         run: |
           mkdir -p build
           printf '%s\n' 'Jun  4 15:16:01 host app[42]: startup' > build/gui-smoke.log
-          SDL_VIDEODRIVER=dummy \
-            GLOGVIEW_GUI_CAPTURE=build/gui-smoke.bmp \
-            GLOGVIEW_GUI_CAPTURE_PROGRESS=1 \
-            build/logview-gui build/gui-smoke.log --format syslog3164 \
-              --syslog-year 2026 --syslog-timezone +02:00
+          python3 - <<'PY'
+          import os
+          import subprocess
+
+          environment = os.environ.copy()
+          environment["SDL_VIDEODRIVER"] = "dummy"
+          environment["GLOGVIEW_GUI_CAPTURE"] = "build/gui-smoke.bmp"
+          subprocess.run(
+              [
+                  "build/logview-gui",
+                  "build/gui-smoke.log",
+                  "--format",
+                  "syslog3164",
+                  "--syslog-year",
+                  "2026",
+                  "--syslog-timezone",
+                  "+02:00",
+              ],
+              check=True,
+              env=environment,
+              timeout=30,
+          )
+          PY
           test -s build/gui-smoke.bmp
 
   build-and-test:
