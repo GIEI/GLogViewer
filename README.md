@@ -1,6 +1,6 @@
 # GLogViewer
 
-GLogViewer is a cross-platform, dependency-free C99 CLI/TUI for exploring large structured log files. The optional desktop GUI uses SDL3. The executable is `logview`. The batch CLI supports raw and JSON Lines input, syslog RFC 3164/5424, Kubernetes CRI container logs, Apache access and Error logs, custom patterns, format detection, compound and range filters, regex, reusable query profiles, record sampling, text/CSV export, exact record/level counts, timestamp timelines, estimated frequent field values, and follow mode with truncation and rotation detection. The TUI supports bounded result windows, viewport navigation, regex and Boolean quoted-literal search, source-line jumps and bookmarks, error/warning jumps, configurable physical context, formatted JSON zoom, field-value summaries, time histograms, filter edits, export, and live follow. Version 1.8.0 improves the optional desktop GUI with reusable query profiles, configurable persistent columns and preferences, and RFC 3164 year/time-zone options. The latest stable release is [1.8.0](https://github.com/GIEI/GLogViewer/releases/tag/v1.8.0). See the [release notes](CHANGELOG.md), [user manual](docs/USER_MANUAL.md), and [known limits](docs/TECHNICAL_SPECIFICATION.md).
+GLogViewer is a cross-platform, dependency-free C99 CLI/TUI for exploring large structured log files. The optional desktop GUI uses SDL3. The executable is `logview`. The batch CLI supports raw and JSON Lines input, syslog RFC 3164/5424, Kubernetes CRI container logs, Apache access and Error logs, custom patterns, format detection, compound and range filters, regex, reusable query profiles, record sampling, text/CSV export, exact record/level counts, timestamp timelines, estimated frequent field values, and follow mode with truncation and rotation detection. The TUI supports bounded result windows, viewport navigation, regex and Boolean quoted-literal search, source-line jumps and bookmarks, error/warning jumps, configurable physical context, formatted JSON zoom, field-value summaries, time histograms, filter edits, export, and live follow. Version 1.9.0 adds Linux/macOS GUI build and startup checks to CI. The latest stable release is [1.9.0](https://github.com/GIEI/GLogViewer/releases/tag/v1.9.0). See the [release notes](CHANGELOG.md), [user manual](docs/USER_MANUAL.md), and [known limits](docs/TECHNICAL_SPECIFICATION.md).
 
 ## Features
 
@@ -34,7 +34,7 @@ The CLI test suite has been reported passing on Windows, Linux, and macOS. Tests
 
 ### Optional desktop GUI
 
-The Nuklear desktop GUI is optional; the default CLI/TUI build has no SDL3 dependency. It provides Boolean search, field filters, raw/field/exclusion regex, custom parsing patterns, paged navigation over the complete matching result set, source-line jump, bookmarks, severity navigation, nearby context, formatted JSON, field-value summaries, a time histogram, text/CSV export, query profiles, and follow mode. The interface shows setup time, scan time, total ready time, and byte progress. Its log-explorer layout puts source and filters at the left, matching records in the center, and structured details at the right. Timestamp, level, and source columns can be toggled; the message column always remains visible and uses available space. Column visibility, context sizes, export format, and window dimensions persist in per-user preferences. The detail pane has structured-field, raw-record, and context tabs. Install the SDL3 development package before building it.
+The Nuklear desktop GUI is optional; the default CLI/TUI build has no SDL3 dependency. It provides Boolean search, field filters, raw/field/exclusion regex, custom parsing patterns, paged navigation over the complete matching result set, source-line jump, bookmarks, severity navigation, nearby context, formatted JSON, field-value summaries, a time histogram, text/CSV export with configurable columns, query profiles, and follow mode. The interface shows setup time, scan time, total ready time, and byte progress. Its log-explorer layout puts source and filters at the left, matching records in the center, and structured details at the right. Timestamp, level, and source columns can be toggled; the message column always remains visible and uses available space. Column visibility, context sizes, export settings, and window dimensions persist in per-user preferences. The detail pane has structured-field, raw-record, and context tabs. The GUI currently handles one file at a time and does not support Top/Bottom result limits. Version 1.9 adds Linux/macOS build and headless startup checks to the release workflow. Install the SDL3 development package before building it.
 
 On Windows, `build.bat gui` looks for the SDL3 Visual C development package in `third_party\SDL3` and in the user's local temporary directory:
 
@@ -47,7 +47,7 @@ On Windows, `build.bat gui` looks for the SDL3 Visual C development package in `
 
 If SDL3 is elsewhere, set `$env:SDL3_DIR` to the directory containing `include\SDL3\SDL.h` and `lib\x64\SDL3.lib` before running `build.bat gui`. For example: `$env:SDL3_DIR = "C:\Libraries\SDL3-3.4.18"`.
 
-On macOS or Linux, install SDL3 and `pkg-config`, then run:
+On macOS, install SDL3 and `pkgconf` with Homebrew. On Linux, install SDL3 development headers, the SDL3 library, and `pkg-config` using your distribution package manager. Confirm that `pkg-config --modversion sdl3` prints a version, then build and launch:
 
 ```sh
 make gui
@@ -55,7 +55,22 @@ build/logview-gui SAMPLES/Linux_1GB.syslog --format syslog3164
 build/logview-gui SAMPLES/Linux_1GB.syslog --format auto --syslog-year 2026
 ```
 
-The GUI scans and analyzes incrementally. A compact temporary disk index provides access to older results while memory remains bounded. Full-record and context views read source data on demand. The Windows GUI build and dummy-video live-scan layout check pass; visual interaction and GUI builds on macOS/Linux remain to be verified. The GUI is a source build and is not included in CLI/TUI release archives. See the [desktop GUI implementation plan](docs/GUI_IMPLEMENTATION_PLAN.md) for the implementation details and remaining work.
+For Ubuntu 24.04, SDL3 development packages are not available from the default repositories. Install SDL3's Linux build dependencies using the [official SDL Linux instructions](https://github.com/libsdl-org/SDL/blob/release-3.4.18/docs/README-linux.md), then build and install the pinned SDL3 release into a local prefix:
+
+```sh
+git clone --depth 1 --branch release-3.4.18 https://github.com/libsdl-org/SDL.git build/SDL3-source
+cmake -S build/SDL3-source -B build/SDL3-build \
+  -DCMAKE_BUILD_TYPE=Release \
+  -DCMAKE_INSTALL_PREFIX="$PWD/build/sdl3-prefix" \
+  -DSDL_INSTALL=ON -DSDL_TEST_LIBRARY=OFF -DSDL_TESTS=OFF -DSDL_EXAMPLES=OFF
+cmake --build build/SDL3-build --parallel 2
+cmake --install build/SDL3-build
+export PKG_CONFIG_PATH="$PWD/build/sdl3-prefix/lib/pkgconfig${PKG_CONFIG_PATH:+:$PKG_CONFIG_PATH}"
+export LD_LIBRARY_PATH="$PWD/build/sdl3-prefix/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+make gui
+```
+
+The GUI scans and analyzes incrementally. A compact temporary disk index provides access to older results while memory remains bounded. Full-record and context views read source data on demand. Windows builds and a dummy-video live-scan check pass locally; CI now builds and startup-smoke-tests the GUI on Linux and macOS. Interactive testing on those desktops remains open. The GUI is a source build and is not included in CLI/TUI release archives. See the [desktop GUI implementation plan](docs/GUI_IMPLEMENTATION_PLAN.md) for implementation details and remaining work.
 
 GitHub Actions builds the project and runs the CLI suite on Windows, Linux, and macOS for pushes and pull requests. Large sample datasets are user-provided and are not included in the repository; CI runs the generated fixtures and scans sample files only when present.
 
@@ -122,6 +137,6 @@ All repository content and every source comment must be written in English. See 
 
 ## Status and license
 
-Status: stable version `1.8.0`. The tagged release workflow runs platform, sanitizer, packaging, and provenance checks before publishing. The optional desktop GUI requires SDL3; Windows builds are verified, while Linux and macOS GUI validation remains open. The existing [LICENSE](LICENSE) governs the repository.
+Status: stable version `1.9.0`. The tagged release workflow runs platform, sanitizer, packaging, and provenance checks before publishing. The optional desktop GUI requires SDL3; Windows builds are verified locally, and Linux/macOS builds and headless startup smoke tests run in CI. Interactive desktop checks and GUI packaging remain open. The existing [LICENSE](LICENSE) governs the repository.
 
 See the [release process](docs/RELEASE_PROCESS.md) for the tag-based packaging workflow.

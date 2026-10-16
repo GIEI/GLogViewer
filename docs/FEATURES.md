@@ -1,6 +1,6 @@
 # Feature Catalogue and Product Positioning
 
-**Status:** Version 1.8.0 is the current stable release. It improves the optional Nuklear/SDL3 desktop GUI with shared query profiles, configurable persistent columns and preferences, and RFC 3164 year/time-zone options. Linux and macOS GUI builds remain unverified. Exact behavior and known limits are specified in [Technical Specification](TECHNICAL_SPECIFICATION.md).
+**Status:** Version 1.9.0 is the current stable release. It adds Linux/macOS GUI builds and headless startup checks to CI. Interactive desktop validation remains open. Exact behavior and known limits are specified in [Technical Specification](TECHNICAL_SPECIFICATION.md).
 
 ## 1. Users and jobs
 
@@ -31,13 +31,13 @@ Common application fields worth preserving are timestamp, severity, message, ser
 | TUI browse/search/help | Must | Explore filtered records interactively | Bounded viewport cache, full-scan checkpoints, regex and Boolean quoted-literal search, source-line jumps and bookmarks, severity jumps, configurable context, formatted JSON zoom, field-value summary, and navigable time histogram. |
 | Query profiles | Must | Repeat investigations without rebuilding command options | Versioned portable settings shared by batch CLI, TUI, and desktop GUI; GUI can load and save parser, filter, regex, and context settings. |
 | Follow mode | Must | Watch a live application file | Append/truncate/rotation behavior documented. |
-| Text and CSV export | Must | Share a filtered evidence set | Streamed output with fixed CSV columns. |
+| Text and CSV export | Must | Share a filtered evidence set | Streamed output; CSV columns can be selected in the CLI and desktop GUI. |
 | Counts, timeline, frequent values | Must | Spot error spikes and dominant fields | Exact counters; bounded estimated heavy hitters. |
 | Multi-file merge | Implemented in 1.4 | Correlate several services | Batch only; each source must be timestamp-monotonic. Unknown timestamps are grouped at the end. TUI, follow, and result-window modes remain single-file. |
 | Native journal/Event Log readers | Later | Inspect platform stores directly | Conflicts with a simple portable file-only v1. |
 | Kubernetes CRI parser | Implemented in 1.5 | Filter container stdout/stderr and inspect timestamps and fragment tags | One physical CRI row remains one record; `P`/`F` are exposed as tags. |
 | Apache Error parser | Implemented in 1.7 | Filter Apache server errors by timestamp, severity, module, and client address | Timezone-free timestamps are interpreted as UTC for statistics. Continuation lines remain raw records. |
-| Optional desktop GUI | Preview in 1.8 | Search, filter, page, inspect, analyze, export, follow logs, reuse query profiles, toggle table columns, retain per-user preferences, and configure RFC 3164 timestamps in a three-pane desktop interface | Requires SDL3; Windows build verified. Linux/macOS GUI builds and GUI packages are not yet verified. |
+| Optional desktop GUI | Preview in 1.8 | Search, filter, page, inspect, analyze, export with custom CSV columns, follow logs, reuse query profiles, toggle table columns, retain per-user preferences, and configure RFC 3164 timestamps in a three-pane desktop interface | Requires SDL3; GUI remains single-file and does not yet support Top/Bottom result limits. Windows build verified locally; Linux/macOS build and dummy-video smoke checks run in CI. GUI packages are not yet available. |
 | Multiline event reconstruction, compressed input | Later | Reassemble fragments and inspect rotated/compressed archives | Needs explicit rules for partial records, rotation, and dependencies. |
 | Automatic template discovery | Research | Reduce custom-pattern setup | Related to [Drain](https://pinjiahe.github.io/files/pdf/research/ICWS17.pdf); not required for v1. |
 

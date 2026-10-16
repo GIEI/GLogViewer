@@ -1,13 +1,20 @@
 # Validation Notes
 
-**Status:** release validation evidence, 2026-10-16. The 1.8.0 tag-triggered workflow is the release gate for clean CLI/TUI builds and tests on Windows, Linux, and macOS, package checks, Linux sanitizers, and artifact attestations. The optional GUI is verified on Windows only and is excluded from release archives. Exploratory sample comparisons are observations, not release benchmarks unless explicitly identified below as the formal 1 GiB benchmark.
+**Status:** release validation evidence, 2026-10-16. The 1.9.0 tag-triggered workflow is configured to gate publication on clean CLI/TUI builds and tests on Windows, Linux, and macOS, GUI builds and startup checks on Linux/macOS, Linux sanitizers, package checks, and artifact attestations. The optional GUI is excluded from release archives. Windows GUI build and dummy-video scan checks pass locally; Linux/macOS jobs await their first run. Exploratory sample comparisons are observations, not release benchmarks unless explicitly identified below as the formal 1 GiB benchmark.
+
+## Version 1.9.0 release validation
+
+- Windows GUI build and dummy-video scan smoke test pass locally after switching startup to `SDL_RunApp`.
+- The release workflow now requires Linux/macOS GUI build and headless startup smoke jobs, in addition to the existing platform CLI/TUI, sanitizer, packaging, and provenance gates.
+- Linux/macOS GUI CI results and the published release URL will be recorded after the tagged workflow completes.
 
 ## Version 1.8.0 pre-release validation
 
 - Windows MSVC CLI build and full CLI/sample suite pass locally; all 16 regular files in `SAMPLES` were scanned.
 - Windows GUI build succeeds with SDL3 3.4.18. The launcher reports the new syslog options and accepts `--syslog-year 2026 --syslog-timezone +02:00` with `--help`.
+- Linux/macOS GUI CI now builds the GUI and launches a dummy-video syslog scan with explicit RFC 3164 year/time-zone settings. Results await the first workflow run.
 - Release archive packaging tests pass locally. The tag-triggered workflow remains responsible for Linux/macOS CLI/TUI tests, Linux sanitizers, package builds, checksums, and provenance.
-- Linux/macOS GUI builds and interactive GUI checks remain open; the GUI is not included in release archives.
+- Interactive GUI checks on Linux/macOS remain open; the GUI is not included in release archives.
 
 ## Version 1.7.0 pre-release validation
 

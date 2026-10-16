@@ -1,6 +1,6 @@
 # GLogViewer Implementation Plan
 
-**Status:** Version 1.8.0 improves the optional desktop GUI with reusable query profiles, persistent display preferences, and RFC 3164 timestamp settings. The CLI/TUI release gate runs the Windows, Linux, and macOS test matrix, Linux sanitizers, and cross-platform package checks. GUI builds on Linux and macOS remain open. All project content and code comments follow the English-only policy in [AGENTS.md](../AGENTS.md).
+**Status:** Version 1.9.0 adds Linux/macOS GUI builds and headless startup checks to the tagged release workflow. Interactive GUI testing on those platforms remains open. The CLI/TUI release gate runs the Windows, Linux, and macOS test matrix, Linux sanitizers, and cross-platform package checks. All project content and code comments follow the English-only policy in [AGENTS.md](../AGENTS.md).
 
 ## Product goals
 

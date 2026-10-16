@@ -30,6 +30,7 @@
 #include "reader.h"
 #include "search_query.h"
 #include "stats.h"
+#include <SDL3/SDL_main.h>
 #include <time.h>
 
 #define GUI_PATH_CAPACITY 2048
@@ -120,6 +121,7 @@ typedef struct {
     char field_regex_text[GUI_REGEX_CAPACITY];
     char exclude_regex_text[GUI_REGEX_CAPACITY];
     char custom_pattern[GUI_PATTERN_CAPACITY];
+    char export_columns[GUI_FILTER_CAPACITY];
     char jump_text[32];
     char error[256];
     char status[256];
@@ -560,6 +562,9 @@ static int load_gui_profile(GuiApp *app, const char *path)
     int format_seen = 0;
     size_t context_before = app->context_before;
     size_t context_after = app->context_after;
+    unsigned syslog_year = app->syslog_year;
+    int syslog_timezone_offset_seconds =
+        app->syslog_timezone_offset_seconds;
     if (file == NULL) {
         SDL_snprintf(app->error, sizeof(app->error),
                      "Cannot open query profile: %s", path);
@@ -606,8 +611,8 @@ static int load_gui_profile(GuiApp *app, const char *path)
         else if (strcmp(line, "exclude_regex") == 0) bit = 1u << 5;
         else if (strcmp(line, "context_before") == 0) bit = 1u << 6;
         else if (strcmp(line, "context_after") == 0) bit = 1u << 7;
-        else if (strcmp(line, "syslog_year") == 0 ||
-                 strcmp(line, "syslog_timezone") == 0) continue;
+        else if (strcmp(line, "syslog_year") == 0) bit = 1u << 8;
+        else if (strcmp(line, "syslog_timezone") == 0) bit = 1u << 9;
         else goto invalid_profile;
         if ((seen & bit) != 0) goto invalid_profile;
         seen |= bit;
@@ -636,6 +641,18 @@ static int load_gui_profile(GuiApp *app, const char *path)
             if (bit == (1u << 6)) context_before = (size_t)parsed;
             else context_after = (size_t)parsed;
         }
+        if (bit == (1u << 8)) {
+            unsigned parsed;
+            if (!parse_gui_unsigned(value, 9999, &parsed))
+                goto invalid_profile;
+            syslog_year = parsed;
+        }
+        if (bit == (1u << 9)) {
+            if (value[0] == '\0') syslog_timezone_offset_seconds = 0;
+            else if (!parse_gui_timezone(value,
+                                         &syslog_timezone_offset_seconds))
+                goto invalid_profile;
+        }
     }
     if (ferror(file) || !format_seen) goto invalid_profile;
     fclose(file);
@@ -649,6 +666,9 @@ static int load_gui_profile(GuiApp *app, const char *path)
                 sizeof(app->exclude_regex_text));
     app->context_before = context_before;
     app->context_after = context_after;
+    app->syslog_year = syslog_year;
+    app->syslog_timezone_offset_seconds =
+        syslog_timezone_offset_seconds;
     app->search[0] = '\0';
     app->severity_filter_active = 0;
     app->severity_filter_mask = GUI_SEVERITY_ALL;
@@ -670,6 +690,8 @@ static int save_gui_profile(GuiApp *app, const char *path)
 {
     FILE *file;
     const char *format = gui_profile_format_name(app->selected_format);
+    char timezone[8];
+    unsigned absolute_offset;
     int failed;
     if (app->path[0] != '\0' && output_paths_same_file(path, app->path)) {
         SDL_strlcpy(app->error,
@@ -684,10 +706,18 @@ static int save_gui_profile(GuiApp *app, const char *path)
                      "Cannot write query profile: %s", path);
         return 0;
     }
+    absolute_offset = (unsigned)(app->syslog_timezone_offset_seconds < 0 ?
+        -app->syslog_timezone_offset_seconds :
+        app->syslog_timezone_offset_seconds);
+    SDL_snprintf(timezone, sizeof(timezone), "%c%02u:%02u",
+                 app->syslog_timezone_offset_seconds < 0 ? '-' : '+',
+                 absolute_offset / 3600u,
+                 (absolute_offset % 3600u) / 60u);
     failed = fprintf(file,
-        "GLOGVIEW_PROFILE 1\nformat=%s\npattern=%s\nfilter=%s\nregex=%s\nregex_field=%s\nexclude_regex=%s\nsyslog_year=0\nsyslog_timezone=\ncontext_before=%u\ncontext_after=%u\n",
+        "GLOGVIEW_PROFILE 1\nformat=%s\npattern=%s\nfilter=%s\nregex=%s\nregex_field=%s\nexclude_regex=%s\nsyslog_year=%u\nsyslog_timezone=%s\ncontext_before=%u\ncontext_after=%u\n",
         format, app->custom_pattern, app->filter_text, app->regex_text,
         app->field_regex_text, app->exclude_regex_text,
+        app->syslog_year, timezone,
         (unsigned)app->context_before, (unsigned)app->context_after) < 0;
     if (fflush(file) != 0) failed = 1;
     if (fclose(file) != 0) failed = 1;
@@ -742,7 +772,8 @@ static int parse_preference_integer(const char *value, int minimum,
 static void load_gui_preferences(GuiApp *app)
 {
     FILE *file;
-    char line[128];
+    char line[GUI_PROFILE_VALUE_CAPACITY + 64];
+    char export_columns[GUI_FILTER_CAPACITY];
     unsigned int seen = 0;
     int show_timestamp = app->show_timestamp_column;
     int show_level = app->show_level_column;
@@ -753,6 +784,8 @@ static void load_gui_preferences(GuiApp *app)
     int window_width = app->window_width;
     int window_height = app->window_height;
     int line_number = 1;
+    SDL_strlcpy(export_columns, app->export_columns,
+                sizeof(export_columns));
     if (!prepare_preferences_path(app)) return;
     file = open_utf8_file(app->preferences_path);
     if (file == NULL) return;
@@ -786,6 +819,7 @@ static void load_gui_preferences(GuiApp *app)
         else if (strcmp(line, "export_format") == 0) bit = 1u << 5;
         else if (strcmp(line, "window_width") == 0) bit = 1u << 6;
         else if (strcmp(line, "window_height") == 0) bit = 1u << 7;
+        else if (strcmp(line, "export_columns") == 0) bit = 1u << 8;
         else goto invalid_preferences;
         if ((seen & bit) != 0) goto invalid_preferences;
         seen |= bit;
@@ -819,6 +853,9 @@ static void load_gui_preferences(GuiApp *app)
         if (bit == (1u << 7) &&
             !parse_preference_integer(value, 640, 8192, &window_height))
             goto invalid_preferences;
+        if (bit == (1u << 8) &&
+            !copy_profile_value(export_columns, sizeof(export_columns), value))
+            goto invalid_preferences;
     }
     if (ferror(file)) goto invalid_preferences;
     fclose(file);
@@ -830,6 +867,8 @@ static void load_gui_preferences(GuiApp *app)
     app->export_format = (OutputFormat)export_format;
     app->window_width = window_width;
     app->window_height = window_height;
+    SDL_strlcpy(app->export_columns, export_columns,
+                sizeof(app->export_columns));
     return;
 
 invalid_preferences:
@@ -851,10 +890,11 @@ static void save_gui_preferences(GuiApp *app)
     file = open_utf8_file_mode(app->preferences_path, "wb");
     if (file == NULL) return;
     write_error = fprintf(file,
-        "GLOGVIEW_GUI_PREFERENCES 1\nshow_timestamp=%d\nshow_level=%d\nshow_source=%d\ncontext_before=%u\ncontext_after=%u\nexport_format=%s\nwindow_width=%d\nwindow_height=%d\n",
+        "GLOGVIEW_GUI_PREFERENCES 1\nshow_timestamp=%d\nshow_level=%d\nshow_source=%d\ncontext_before=%u\ncontext_after=%u\nexport_format=%s\nexport_columns=%s\nwindow_width=%d\nwindow_height=%d\n",
         app->show_timestamp_column, app->show_level_column,
         app->show_source_column, (unsigned)app->context_before,
-        (unsigned)app->context_after, export_format, width, height) < 0;
+        (unsigned)app->context_after, export_format, app->export_columns,
+        width, height) < 0;
     if (fflush(file) != 0) write_error = 1;
     if (fclose(file) != 0) write_error = 1;
     if (write_error)
@@ -1779,7 +1819,10 @@ static void start_export(GuiApp *app, const char *destination)
         app->export_scratch_ready = 1;
     }
     if (!output_init_utf8(&app->output, destination, app->path,
-                          app->export_format, NULL, 0, 0,
+                          app->export_format,
+                          app->export_columns[0] != '\0' ?
+                              app->export_columns : NULL,
+                          0, 0,
                           output_error, sizeof(output_error))) {
         if (app->output.stream != NULL) {
             output_finish(&app->output);
@@ -2891,11 +2934,16 @@ static void render_details(GuiApp *app)
                  NK_TEXT_LEFT);
         if (nk_button_label(app->nk, "Back to record")) app->analysis_view = 0;
         SDL_snprintf(label, sizeof(label),
-                     "Records analyzed: %llu   Matching: %llu%s",
+                     "Physical: %llu   Parsed: %llu   Rejected: %llu%s",
                      (unsigned long long)app->analysis_stats.physical,
-                     (unsigned long long)app->analysis_stats.selected,
+                     (unsigned long long)app->analysis_stats.parsed,
+                     (unsigned long long)app->analysis_stats.rejected,
                      app->analysis_active ? "   (working)" : "");
         nk_layout_row_dynamic(app->nk, 26, 1);
+        nk_label(app->nk, label, NK_TEXT_LEFT);
+        SDL_snprintf(label, sizeof(label), "Selected: %llu",
+                     (unsigned long long)app->analysis_stats.selected);
+        nk_layout_row_dynamic(app->nk, 24, 1);
         nk_label(app->nk, label, NK_TEXT_LEFT);
         if (app->analysis_view == 1) {
             nk_layout_row_dynamic(app->nk, 24, 1);
@@ -3132,23 +3180,55 @@ static void render_details(GuiApp *app)
         }
         if (app->detail_tab == 2) {
             size_t context_index;
-            nk_layout_row_dynamic(app->nk, 30, 4);
-            if (nk_button_label(app->nk, app->context_visible ?
-                                "Reload" : "Load context"))
-                start_context_load(app);
-            if (nk_button_label(app->nk, "-") && app->context_before > 0 &&
+            nk_layout_row_dynamic(app->nk, 28, 2);
+            if (nk_button_label(app->nk, "Before -") &&
+                app->context_before > 0) {
+                app->context_before--;
+                if (app->context_visible) start_context_load(app);
+            }
+            if (nk_button_label(app->nk, "Before +") &&
+                app->context_before < GUI_CONTEXT_SIDE_MAX) {
+                app->context_before++;
+                if (app->context_visible) start_context_load(app);
+            }
+            nk_layout_row_dynamic(app->nk, 28, 2);
+            if (nk_button_label(app->nk, "After -") &&
                 app->context_after > 0) {
+                app->context_after--;
+                if (app->context_visible) start_context_load(app);
+            }
+            if (nk_button_label(app->nk, "After +") &&
+                app->context_after < GUI_CONTEXT_SIDE_MAX) {
+                app->context_after++;
+                if (app->context_visible) start_context_load(app);
+            }
+            nk_layout_row_dynamic(app->nk, 28, 3);
+            if (nk_button_label(app->nk, "Both -") &&
+                app->context_before > 0 && app->context_after > 0) {
                 app->context_before--;
                 app->context_after--;
                 if (app->context_visible) start_context_load(app);
             }
-            if (nk_button_label(app->nk, "+") &&
+            if (nk_button_label(app->nk, "Both +") &&
                 app->context_before < GUI_CONTEXT_SIDE_MAX &&
                 app->context_after < GUI_CONTEXT_SIDE_MAX) {
                 app->context_before++;
                 app->context_after++;
                 if (app->context_visible) start_context_load(app);
             }
+            if (nk_button_label(app->nk, app->context_visible ?
+                                "Reload" : "Load context"))
+                start_context_load(app);
+            {
+                char context_sizes[64];
+                SDL_snprintf(context_sizes, sizeof(context_sizes),
+                             "Before: %u   After: %u",
+                             (unsigned)app->context_before,
+                             (unsigned)app->context_after);
+                nk_layout_row_dynamic(app->nk, 24, 1);
+                nk_label(app->nk, context_sizes, NK_TEXT_LEFT);
+            }
+            nk_layout_row_dynamic(app->nk, 24, 1);
             nk_label(app->nk, app->context_loading ? "Loading..." :
                      "Nearby source records", NK_TEXT_LEFT);
             if (app->context_visible &&
@@ -3373,6 +3453,15 @@ static void render_sidebar(GuiApp *app)
                                   (int)app->export_format, 30,
                                   nk_vec2(230, 100)) == 0 ?
                          OUTPUT_TEXT : OUTPUT_CSV;
+    if (app->export_format == OUTPUT_CSV) {
+        nk_layout_row_dynamic(app->nk, 20, 1);
+        nk_label_colored(app->nk, "CSV columns (empty uses defaults)",
+                         NK_TEXT_LEFT, nk_rgb(163, 181, 202));
+        nk_layout_row_dynamic(app->nk, 29, 1);
+        nk_edit_string_zero_terminated(app->nk, NK_EDIT_FIELD,
+                                       app->export_columns,
+                                       (int)sizeof(app->export_columns), NULL);
+    }
     nk_layout_row_dynamic(app->nk, 30, 2);
     if (nk_button_label(app->nk, "Export")) show_save_dialog(app);
     if (nk_button_label(app->nk, "Clear queries") && !app->scanning)
@@ -3826,7 +3915,7 @@ cleanup:
     return result;
 }
 
-int main(int argc, char **argv)
+static int SDLCALL gui_main(int argc, char *argv[])
 {
     GuiApp app;
     int index;
@@ -3887,4 +3976,9 @@ int main(int argc, char **argv)
         }
     }
     return gui_run(&app);
+}
+
+int main(int argc, char **argv)
+{
+    return SDL_RunApp(argc, argv, gui_main, NULL);
 }

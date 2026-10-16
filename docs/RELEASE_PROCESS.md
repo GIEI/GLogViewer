@@ -18,4 +18,4 @@ gh attestation verify logview-linux-x86_64.tar.gz --repo GIEI/GLogViewer
 
 Use the matching downloaded archive path on Windows and macOS. Verification requires a supported GitHub CLI version and an online connection.
 
-The optional Nuklear/SDL3 desktop GUI is currently a Windows-verified source preview. It is not included in the platform archives; GUI packaging begins after Windows, Linux, and macOS build and interaction checks pass.
+The optional Nuklear/SDL3 desktop GUI is source-built separately from the platform archives. Its Linux and macOS builds and headless startup smoke tests are release gates; interactive desktop testing and GUI packaging remain separate follow-up work.

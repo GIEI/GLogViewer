@@ -1,6 +1,6 @@
 # User Manual
 
-**Status:** GLogViewer 1.8.0 improves the optional desktop GUI with query profiles, persistent column preferences, and RFC 3164 timestamp options. See the [release process](RELEASE_PROCESS.md).
+**Status:** GLogViewer 1.9.0 adds Linux/macOS GUI builds and headless startup checks to CI. The optional GUI still requires SDL3 and is built separately from the CLI/TUI release archives. See the [release process](RELEASE_PROCESS.md).
 
 ## 1. What the tool will do
 
@@ -274,7 +274,7 @@ The details pane has **Structured fields**, **Raw record**, and **Context** tabs
 
 Choose **Export** to write the complete active result set as text or CSV. The GUI scans again during export and remains responsive; the export can be cancelled. Select **Follow** before scanning to read existing records and continue monitoring, or enable it after a completed scan to watch for appended records. File replacement or truncation triggers a rescan. Setup, scan, and total ready times appear below the results along with byte progress.
 
-The GUI currently handles one file at a time. Use **Load profile** and **Save profile** in the sidebar to reuse the shared `GLOGVIEW_PROFILE 1` settings for format, custom pattern, field filter, raw regex, field regex, excluded regex, and context sizes. Loading a profile clears the GUI-only Boolean search and severity selections; those settings are not stored in the shared profile format. Pass `--syslog-year YYYY` and optionally `--syslog-timezone +/-HH:MM` at launch to configure RFC 3164 time histogram analysis; the defaults are the current year and UTC. Open **Visible columns** in the sidebar to show or hide Timestamp, Level, and Source; Message always stays visible. Column visibility, context sizes, export format, and window dimensions are saved in a separate per-user preferences file and restored on the next launch.
+The GUI handles one file at a time and does not yet provide the CLI/TUI `--top` and `--bottom` result limits. Use **Load profile** and **Save profile** in the sidebar to reuse the shared `GLOGVIEW_PROFILE 1` settings for format, custom pattern, field filter, raw regex, field regex, excluded regex, RFC 3164 year/time zone, and context sizes. Loading a profile clears the GUI-only Boolean search and severity selections; those settings are not stored in the shared profile format. Pass `--syslog-year YYYY` and optionally `--syslog-timezone +/-HH:MM` at launch to configure RFC 3164 time histogram analysis; the defaults are the current year and UTC. Open **Visible columns** in the sidebar to show or hide Timestamp, Level, and Source; Message always stays visible. For CSV export, enter a comma-separated **CSV columns** list; leave it empty to use the default columns. In the Context tab, set the before and after radii separately or adjust both together. Column visibility, context sizes, export format, CSV columns, and window dimensions are saved in a separate per-user preferences file and restored on the next launch.
 
 ## 10. Exit codes and troubleshooting
 

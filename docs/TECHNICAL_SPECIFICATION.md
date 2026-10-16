@@ -1,7 +1,7 @@
 # Technical Specification
 
 **Project:** GLogViewer (`logview`)  
-**Status:** Version 1.8.0 improves the optional Nuklear/SDL3 desktop GUI with saved profiles, persistent preferences, and RFC 3164 year/time-zone settings. The GUI is not included in CLI/TUI release archives. See [validation notes](VALIDATION.md).
+**Status:** Version 1.9.0 adds Linux/macOS GUI build and headless startup checks to CI. The GUI requires SDL3 and is not included in CLI/TUI release archives. See [validation notes](VALIDATION.md).
 **Language:** C99; all repository content is English.
 
 ## 1. Purpose and scope

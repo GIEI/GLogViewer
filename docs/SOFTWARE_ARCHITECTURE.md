@@ -1,6 +1,6 @@
 # Software Architecture
 
-**Status:** architecture for stable versions 1.0 through 1.8.0. Version 1.7 added Apache Error parsing and an optional Nuklear/SDL3 desktop presentation layer; version 1.8 adds persisted GUI preferences, shared query-profile handling, and explicit RFC 3164 analysis settings. The core CLI/TUI has no SDL3 dependency. The behavioral contract is in [Technical Specification](TECHNICAL_SPECIFICATION.md), and validation evidence is in [Validation notes](VALIDATION.md).
+**Status:** architecture for stable versions 1.0 through 1.9.0. Version 1.7 added Apache Error parsing and an optional Nuklear/SDL3 desktop presentation layer; version 1.8 adds persisted GUI preferences, shared query-profile handling, and explicit RFC 3164 analysis settings; version 1.9 adds Linux/macOS GUI build and startup checks. The core CLI/TUI has no SDL3 dependency. The behavioral contract is in [Technical Specification](TECHNICAL_SPECIFICATION.md), and validation evidence is in [Validation notes](VALIDATION.md).
 
 ## 1. Architectural goals
 

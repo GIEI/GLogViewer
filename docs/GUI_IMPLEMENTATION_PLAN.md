@@ -1,6 +1,6 @@
 # GLogViewer Desktop GUI Implementation Plan
 
-**Status:** The Windows GUI preview implements the TUI investigation workflows and is built with Nuklear 4.13.3 and SDL3 3.4.18. Version 1.8 adds shared query profiles, persistent preferences, configurable columns, and RFC 3164 timestamp options. Its MSVC build and dummy-video live-scan capture pass. Linux/macOS GUI builds, interactive control checks, packaging, and automated GUI behavior coverage remain future release gates.
+**Status:** The desktop GUI implements the TUI investigation workflows and is built with Nuklear 4.13.3 and SDL3. Version 1.8 adds shared query profiles, persistent preferences, configurable columns, and RFC 3164 timestamp options. A cross-platform CI job now builds the GUI and runs a dummy-video scan smoke test on Linux and macOS; the first workflow run and interactive desktop checks remain to be verified. GUI packaging and automated interactive behavior coverage remain open.
 
 ## 1. Goals
 
@@ -21,7 +21,7 @@
 
 SDL3 and Nuklear are GUI-only dependencies. The default `logview` CLI/TUI build must continue to build without either library. The GUI target may link SDL3 and ship its runtime where the platform requires it. The Nuklear repository documents that it emits draw commands and that platform/rendering backends are supplied by the application; therefore a small project-owned Nuklear-to-SDL3 adapter is part of the plan. Pin and record the exact upstream revisions and license notices before implementation.
 
-The first prototype vendors Nuklear release `v4.13.3` at commit `a53ad2c658151071501372a5e0e5e978153835aa` and uses its SDL3 renderer adapter. The optional Windows build was compiled and startup-smoke-tested with SDL3 `3.4.18`; other platform builds have not yet been verified.
+The first prototype vendors Nuklear release `v4.13.3` at commit `a53ad2c658151071501372a5e0e5e978153835aa` and uses its SDL3 renderer adapter. Linux CI builds pinned SDL3 `3.4.18` from source; macOS CI uses the SDL3 Homebrew package. Windows has been compiled and smoke-tested with SDL3 `3.4.18`.
 
 ## 3. User experience scope
 
@@ -33,10 +33,10 @@ The current desktop implementation includes:
 - Quick severity filters for TRACE, DEBUG, INFO, NOTICE, WARN, ERROR, and OTHER; changing them starts a fresh bounded scan.
 - Disk-indexed pages across the complete matching result set, source-line jump, bookmarks, and error/warning navigation.
 - A details pane with structured fields, formatted JSON, exact raw source text, and configurable nearby context.
-- Field-value summaries, a UTC time histogram, text/CSV export, and file follow.
+- Field-value summaries with physical/parsed/rejected/selected counts, a UTC time histogram, text/CSV export with configurable CSV columns, and file follow.
 - Cancel controls, byte progress, setup/scan/ready timers, and contextual help.
 
-Remaining work focuses on cross-platform GUI verification, automated interaction coverage, packaging, multi-file workflows, sorting, and accessibility improvements.
+The desktop interface now has controls for the investigation and analysis workflows available in the TUI. Remaining feature-parity gaps are multi-file sessions and Top/Bottom result-limited views; remaining engineering work includes cross-platform GUI verification, automated interaction coverage, packaging, sorting, and accessibility improvements.
 
 ## 4. Architecture
 
@@ -70,9 +70,9 @@ Scanning should advance in bounded work slices from the desktop event loop in th
 - Re-read a selected row from its source offset and display the complete record in 1 KiB pages, while showing parsed timestamp, level, and message fields when available.
 - Provide source-line jump, bookmarks, severity navigation, nearby context, formatted JSON, field-value analysis, time histogram, and follow mode.
 - Export the active query result set to text or CSV through a second incremental scan; export paths use UTF-8 on Windows.
-- The GUI remains single-file. Query profiles can load and save the shared `GLOGVIEW_PROFILE 1` format. Timestamp, level, and source column visibility, context sizes, export format, and window size persist in a separate per-user preferences file; message is always visible.
+- The GUI remains single-file and does not yet expose Top/Bottom result limits. Query profiles load and save the shared `GLOGVIEW_PROFILE 1` format, including RFC 3164 year/time-zone settings. Timestamp, level, and source column visibility, independent context sizes, export format, CSV columns, and window size persist in a separate per-user preferences file; message is always visible.
 
-**Current verification:** MSVC GUI build succeeds with SDL3 3.4.18, and the dummy-video scan smoke test stays active while processing a JSON Lines sample. The Windows CLI test suite passes across all 16 files in `SAMPLES`. GUI controls, analysis results, follow rotation, visual layout, and large-file memory still need interactive verification. macOS/Linux GUI builds and runtime behavior remain unverified.
+**Current verification:** The MSVC GUI build and Windows dummy-video scan smoke test pass locally. The CI workflow now builds SDL3 and GLogViewer GUI on Linux, installs SDL3 and builds the GUI on macOS, then runs the same dummy-video scan smoke test on both platforms. GUI controls, analysis results, follow rotation, visual layout, and large-file memory still need interactive verification on macOS and Linux.
 
 The scan uses work slices of up to 80 ms, disables renderer VSync while scanning, and restores it when scanning ends. SDL events are handled between slices, and a lightweight progress view avoids redrawing the result table and detail pane during the scan. Result-index writes are batched. The theme uses higher-contrast colors, a branded toolbar, grouped sidebar sections, selected detail tabs, table headings, and byte progress. Source-line and level columns measure visible-page content while the message column uses the remaining width. Narrow windows stack results and details. Setup, scan, recent-record preparation, and total ready time are shown separately. The result navigation controls use two compact rows to keep pagination, bookmarks, and source-line jump visible at common window sizes. Advanced matching options are grouped under a collapsed sidebar section. A Windows screenshot review confirmed the three-pane proportions and Apache Error field presentation; interactive controls and other operating systems still need manual review.
 
@@ -89,10 +89,10 @@ The scan uses work slices of up to 80 ms, disables renderer VSync while scanning
 
 ### Verification notes
 
-- Build the GUI with `build.bat gui` on Windows; the script searches common local SDL3 extraction paths and accepts `SDL3_DIR` for custom locations. On macOS/Linux, use `make gui` where SDL3 development files and `pkg-config` are available.
-- On Windows, the GUI was compiled with MSVC and SDL3 3.4.18 and launched with SDL's dummy video driver while scanning a JSON Lines sample.
+- Build the GUI with `build.bat gui` on Windows; the script searches common local SDL3 extraction paths and accepts `SDL3_DIR` for custom locations. On macOS/Linux, install SDL3 and `pkg-config`, then use `make gui`.
+- On Windows, the GUI was compiled with MSVC and SDL3 3.4.18 and launched with SDL's dummy video driver while scanning a JSON Lines sample. CI builds and runs the same scan smoke test on Linux and macOS.
 - The Windows CLI regression suite passes with the GUI sources and optional dependency excluded from the normal build.
-- macOS/Linux GUI builds, visual interaction, and large-file GUI performance have not been verified. The dummy-driver startup check confirms initialization and event-loop operation only; it does not replace manual GUI testing.
+- The first Linux/macOS GUI CI run, visual interaction, and large-file GUI performance remain to be verified. The dummy-driver startup check confirms initialization and event-loop operation only; it does not replace manual GUI testing.
 - The dummy-video check verifies process startup and scan-loop survival, not interactive controls, visual layout, or a completed large-file scan.
 
 ### Phase 1: UI-neutral log session

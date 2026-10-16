@@ -13,6 +13,72 @@ permissions:
   contents: read
 
 jobs:
+  gui-build-smoke:
+    name: Build and launch GUI (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os:
+          - ubuntu-24.04
+          - macos-15
+
+    steps:
+      - name: Check out GLogViewer
+        uses: actions/checkout@v7
+
+      - name: Install Linux SDL build dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential cmake pkg-config \
+            libasound2-dev libdbus-1-dev libdrm-dev libegl1-mesa-dev \
+            libfribidi-dev libgbm-dev libgl1-mesa-dev libgles2-mesa-dev \
+            libibus-1.0-dev libpipewire-0.3-dev libpulse-dev libthai-dev \
+            libudev-dev libusb-1.0-0-dev libwayland-dev libx11-dev \
+            libxext-dev libxcursor-dev libxfixes-dev libxi-dev \
+            libxkbcommon-dev libxrandr-dev libxss-dev libxtst-dev \
+            libdecor-0-dev
+
+      - name: Check out SDL3
+        if: runner.os == 'Linux'
+        uses: actions/checkout@v7
+        with:
+          repository: libsdl-org/SDL
+          ref: release-3.4.18
+          path: build/SDL3-source
+
+      - name: Build and install SDL3 on Linux
+        if: runner.os == 'Linux'
+        run: |
+          cmake -S build/SDL3-source -B build/SDL3-build \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_INSTALL_PREFIX="$RUNNER_TEMP/sdl3" \
+            -DSDL_INSTALL=ON -DSDL_TEST_LIBRARY=OFF \
+            -DSDL_TESTS=OFF -DSDL_EXAMPLES=OFF
+          cmake --build build/SDL3-build --parallel 2
+          cmake --install build/SDL3-build
+          echo "PKG_CONFIG_PATH=$RUNNER_TEMP/sdl3/lib/pkgconfig" >> "$GITHUB_ENV"
+          echo "LD_LIBRARY_PATH=$RUNNER_TEMP/sdl3/lib" >> "$GITHUB_ENV"
+
+      - name: Install SDL3 on macOS
+        if: runner.os == 'macOS'
+        run: brew install sdl3 pkgconf
+
+      - name: Build GUI
+        run: make gui
+
+      - name: Smoke-test GUI startup and scan loop
+        run: |
+          mkdir -p build
+          printf '%s\n' 'Jun  4 15:16:01 host app[42]: startup' > build/gui-smoke.log
+          SDL_VIDEODRIVER=dummy \
+            GLOGVIEW_GUI_CAPTURE=build/gui-smoke.bmp \
+            GLOGVIEW_GUI_CAPTURE_PROGRESS=1 \
+            build/logview-gui build/gui-smoke.log --format syslog3164 \
+              --syslog-year 2026 --syslog-timezone +02:00
+          test -s build/gui-smoke.bmp
+
   build-and-test:
     name: Build and test (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
@@ -135,6 +201,7 @@ jobs:
     if: startsWith(github.ref, 'refs/tags/v')
     needs:
       - build-and-test
+      - gui-build-smoke
       - sanitizer
     runs-on: ubuntu-24.04
     permissions:

@@ -1,5 +1,23 @@
 # GLogViewer Changelog
 
+## 1.9.0 — 2026-10-16
+
+Adds Linux and macOS build and startup verification for the optional desktop GUI.
+
+### Included
+
+- Initialize the desktop application through SDL3's platform-aware `SDL_RunApp` entry point.
+- Add Linux and macOS CI jobs that build GLogViewer GUI, launch a headless syslog scan, and verify a rendered frame.
+- Pin SDL3 3.4.18 for the Linux CI build and document local SDL3 setup for Ubuntu 24.04 and Homebrew macOS.
+- Add GUI CSV column selection, independent before/after context controls, complete analysis counters, and RFC 3164 settings in shared query profiles.
+- Document the remaining GUI limits: single-file sessions and no Top/Bottom result limit.
+
+### Validation status
+
+- Windows GUI build and dummy-video scan smoke test pass locally.
+- Linux and macOS GUI builds and headless startup checks run as required release workflow jobs; publication waits for these jobs and the existing CLI/TUI and sanitizer gates.
+- Interactive GUI testing on Linux and macOS remains with the project owner; GUI application bundles are not included in release archives.
+
 ## 1.8.0 — 2026-10-16
 
 Improves desktop workflows and supports RFC 3164 timestamp settings from the GUI launcher.
