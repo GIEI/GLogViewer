@@ -1,6 +1,14 @@
 # Validation Notes
 
-**Status:** release validation evidence, 2026-10-16. The 1.9.1 tagged workflow gates publication on Windows/Linux/macOS CLI/TUI tests, GUI builds and startup checks on all three platforms, GUI archive contents, Linux sanitizers, and artifact attestations. GUI archives include SDL3 runtime files and license notices. Interactive GUI testing on target desktops remains open. Exploratory sample comparisons are observations, not release benchmarks unless explicitly identified below as the formal 1 GiB benchmark.
+**Status:** release validation evidence, 2026-10-16. The 1.9.2 tagged workflow passed Windows/Linux/macOS CLI/TUI tests, GUI builds and startup checks on all three platforms, GUI archive contents, Linux sanitizers, and artifact attestations. GUI archives include SDL3 runtime files and license notices. Interactive GUI testing on target desktops remains open. Exploratory sample comparisons are observations, not release benchmarks unless explicitly identified below as the formal 1 GiB benchmark.
+
+## Version 1.9.2 release validation
+
+- The tagged GitHub Actions run [#50](https://github.com/GIEI/GLogViewer/actions/runs/38959640460) passed all CLI/TUI platform tests, GUI build and packaged startup checks on Windows, Linux, and macOS, and Linux AddressSanitizer/UndefinedBehaviorSanitizer checks.
+- Windows local validation passed `build.bat` and `tests/test_cli.py`, including scans of all 16 regular files in `SAMPLES`; the binary reports `logview 1.9.2`.
+- The release contains CLI and SDL3-bundled GUI archives for Windows x86_64, Linux x86_64, and macOS arm64, plus `SHA256SUMS.txt`.
+- GUI field summaries and time histograms reuse completed in-memory analysis results in-session. The cache is invalidated when a new scan begins or followed records arrive, and its key includes the analysis field, parser format, and RFC 3164 year/time-zone settings.
+- Interactive desktop testing on target Windows, Linux, and macOS systems remains open.
 
 ## Version 1.9.1 release validation
 
