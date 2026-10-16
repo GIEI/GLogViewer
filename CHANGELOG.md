@@ -1,5 +1,11 @@
 # GLogViewer Changelog
 
+## 1.9.2 — 2026-10-16
+
+- Cache completed GUI field summaries and time histograms for reuse during the current session.
+- Invalidate cached analysis when a new scan starts, followed records arrive, or analysis settings change.
+- Keep the current multi-pass analysis on first use; subsequent views reuse its completed results.
+
 ## 1.9.1 — 2026-10-16
 
 Adds downloadable desktop GUI bundles for Windows, Linux, and macOS.

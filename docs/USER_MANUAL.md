@@ -1,6 +1,6 @@
 # User Manual
 
-**Status:** GLogViewer 1.9.1 publishes optional GUI archives for Windows, Linux, and macOS. The GUI archives include SDL3; the CLI/TUI archives remain dependency-free. See the [release process](RELEASE_PROCESS.md).
+**Status:** GLogViewer 1.9.2 reuses completed field summaries and time histograms while the current file and analysis settings remain unchanged. Version 1.9.1 publishes optional GUI archives for Windows, Linux, and macOS. The GUI archives include SDL3; the CLI/TUI archives remain dependency-free. See the [release process](RELEASE_PROCESS.md).
 
 ## 1. What the tool will do
 

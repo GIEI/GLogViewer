@@ -1,6 +1,6 @@
 # GLogViewer Implementation Plan
 
-**Status:** Version 1.9.1 publishes platform GUI archives with SDL3 runtime files. The release gate builds and smoke-tests the GUI and checks archive contents on Windows, Linux, and macOS; interactive GUI testing remains open. The CLI/TUI release gate runs the Windows, Linux, and macOS test matrix plus Linux sanitizers. All project content and code comments follow the English-only policy in [AGENTS.md](../AGENTS.md).
+**Status:** Version 1.9.2 caches completed GUI field summaries and time histograms for reuse during the current session. The release gate builds and smoke-tests GUI packages and checks archive contents on Windows, Linux, and macOS; interactive GUI testing remains open. The CLI/TUI release gate runs the Windows, Linux, and macOS test matrix plus Linux sanitizers. All project content and code comments follow the English-only policy in [AGENTS.md](../AGENTS.md).
 
 ## Product goals
 
@@ -171,4 +171,4 @@ Compressed input, multi-line event reconstruction, and persistent indexes are ca
 
 ## Desktop GUI preview
 
-The optional Nuklear/SDL3 desktop GUI is included in source. Version 1.8 adds query profiles, persistent preferences, configurable columns, and RFC 3164 analysis options. The CLI/TUI builds remain independent of SDL3. Windows GUI builds pass; macOS/Linux GUI verification, visual interaction checks, and packaging remain open. See the [desktop GUI implementation plan](GUI_IMPLEMENTATION_PLAN.md) for current scope and remaining work.
+The optional Nuklear/SDL3 desktop GUI is included in source. Version 1.8 adds query profiles, persistent preferences, configurable columns, and RFC 3164 analysis options. Version 1.9.2 reuses completed GUI field summaries and time histograms in memory until a new scan, followed record, or setting change invalidates them. The CLI/TUI builds remain independent of SDL3. GUI packages are built and smoke-tested on Windows, Linux, and macOS; interactive visual checks remain open. See the [desktop GUI implementation plan](GUI_IMPLEMENTATION_PLAN.md) for current scope and remaining work.

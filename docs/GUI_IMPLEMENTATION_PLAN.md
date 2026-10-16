@@ -1,6 +1,6 @@
 # GLogViewer Desktop GUI Implementation Plan
 
-**Status:** The desktop GUI implements the TUI investigation workflows and is built with Nuklear 4.13.3 and SDL3. Version 1.9.1 publishes platform GUI archives with the SDL3 runtime, launch scripts, and license notice. CI builds, launches, and tests GUI archives on Windows, Linux, and macOS. Interactive visual testing and automated GUI behavior coverage remain open.
+**Status:** The desktop GUI implements the TUI investigation workflows and is built with Nuklear 4.13.3 and SDL3. Version 1.9.1 publishes platform GUI archives with the SDL3 runtime, launch scripts, and license notice. Version 1.9.2 caches completed field summaries and time histograms in memory and invalidates them when the file or analysis settings change. CI builds, launches, and tests GUI archives on Windows, Linux, and macOS. Interactive visual testing and automated GUI behavior coverage remain open.
 
 ## 1. Goals
 

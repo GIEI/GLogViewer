@@ -21,7 +21,7 @@
 #include <windows.h>
 #endif
 
-#define LOGVIEW_VERSION "1.9.1"
+#define LOGVIEW_VERSION "1.9.2"
 #define FIELD_NAME_CAPACITY 256
 #define PROFILE_VALUE_CAPACITY 4096
 #define LOGVIEW_MAX_INPUTS 16

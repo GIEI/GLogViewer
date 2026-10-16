@@ -1,6 +1,6 @@
 # GLogViewer Product Roadmap
 
-**Status:** Version 1.9.1 is the current stable release. The tag-triggered workflow tests Windows, Linux, and macOS CLI/TUI builds; builds and smoke-tests GUI packages on all three platforms; and runs sanitizers, archive checks, and provenance generation. This roadmap preserves release history and defines the next direction. See the [implementation plan](IMPLEMENTATION_PLAN.md) and [validation notes](VALIDATION.md).
+**Status:** Version 1.9.2 is the current stable release. It caches completed GUI field summaries and time histograms for reuse during the current session. The tag-triggered workflow tests Windows, Linux, and macOS CLI/TUI builds; builds and smoke-tests GUI packages on all three platforms; and runs sanitizers, archive checks, and provenance generation. This roadmap preserves release history and defines the next direction. See the [implementation plan](IMPLEMENTATION_PLAN.md) and [validation notes](VALIDATION.md).
 
 ## Product decision
 
@@ -38,7 +38,7 @@ Versions 1.2 through 1.8 are complete. Later milestones will evaluate additional
 | **1.9 Cross-platform GUI distribution** | Download and launch the desktop GUI on Windows, Linux, and macOS. | SDL platform-aware startup, platform GUI archives with SDL3 runtime and license notice, platform launchers, and headless scan smoke checks. | Release publication waits for GUI builds, launch smoke tests, archive content checks, and all existing release gates. |
 | **1.x Format expansion** | Inspect more operational data with the same local workflow. | Compressed input and additional container formats, selected by demand and dependency review. | Format fixtures, malformed-input behavior, portability, license/dependency review, and large-file performance are documented before inclusion. |
 
-Version 1.9.0 added Linux/macOS GUI build and startup checks. Version 1.9.1 publishes separate GUI archives for Windows, Linux, and macOS, bundling SDL3 and its license notice. Linux still uses host graphics and audio libraries; the macOS archive targets Apple Silicon. See the [implementation plan](IMPLEMENTATION_PLAN.md) and [release changelog](../CHANGELOG.md).
+Version 1.9.0 added Linux/macOS GUI build and startup checks. Version 1.9.1 publishes separate GUI archives for Windows, Linux, and macOS, bundling SDL3 and its license notice. Version 1.9.2 caches completed GUI field summaries and time histograms in memory for the current session. Linux still uses host graphics and audio libraries; the macOS archive targets Apple Silicon. See the [implementation plan](IMPLEMENTATION_PLAN.md) and [release changelog](../CHANGELOG.md).
 
 ## Desktop GUI
 

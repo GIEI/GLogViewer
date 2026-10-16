@@ -234,6 +234,14 @@ typedef struct {
     int analysis_view;
     int analysis_active;
     int analysis_phase;
+    int analysis_cache_valid;
+    uint64_t analysis_generation;
+    uint64_t analysis_run_generation;
+    uint64_t analysis_cache_generation;
+    InputFormat analysis_cache_format;
+    unsigned analysis_cache_year;
+    int analysis_cache_timezone_offset_seconds;
+    char analysis_cache_field[128];
     uint64_t analysis_physical;
     uint64_t analysis_selected;
     uint64_t analysis_result_sequence;
@@ -1027,6 +1035,12 @@ static void close_analysis(GuiApp *app)
     }
 }
 
+static void invalidate_analysis_cache(GuiApp *app)
+{
+    app->analysis_cache_valid = 0;
+    app->analysis_generation++;
+}
+
 static void close_level_navigation(GuiApp *app)
 {
     app->level_nav_active = 0;
@@ -1057,7 +1071,37 @@ static void start_analysis(GuiApp *app, int view)
     StatsTimestampConfig config;
     time_t now;
     struct tm *local_time;
+    if (!app->scan_complete || app->scanning) {
+        close_analysis(app);
+        app->analysis_view = view;
+        set_error(app, "Finish the scan before starting analysis");
+        return;
+    }
+    now = time(NULL);
+    local_time = localtime(&now);
+    config.syslog_year = app->syslog_year != 0 ? app->syslog_year :
+        (local_time != NULL ? (unsigned)(local_time->tm_year + 1900) : 0);
+    config.syslog_timezone_offset_seconds =
+        app->syslog_timezone_offset_seconds;
+
+    if (app->analysis_cache_valid &&
+        app->analysis_cache_generation == app->analysis_generation &&
+        app->analysis_cache_format == app->format &&
+        app->analysis_cache_year == config.syslog_year &&
+        app->analysis_cache_timezone_offset_seconds ==
+            config.syslog_timezone_offset_seconds &&
+        strcmp(app->analysis_cache_field, app->analysis_field) == 0) {
+        close_analysis(app);
+        app->analysis_view = view;
+        app->error[0] = '\0';
+        SDL_strlcpy(app->status, "Analysis results loaded from cache",
+                    sizeof(app->status));
+        return;
+    }
+
     close_analysis(app);
+    app->analysis_cache_valid = 0;
+    app->analysis_run_generation = app->analysis_generation;
     app->analysis_view = view;
     app->analysis_physical = 0;
     app->analysis_selected = 0;
@@ -1068,10 +1112,6 @@ static void start_analysis(GuiApp *app, int view)
             app->histogram_first_sequence[bin] = UINT64_MAX;
     }
     stats_init(&app->analysis_stats);
-    if (!app->scan_complete || app->scanning) {
-        set_error(app, "Finish the scan before starting analysis");
-        return;
-    }
     if (app->analysis_field[0] != '\0' &&
         !stats_set_focus_field(&app->analysis_stats,
                                (const unsigned char *)app->analysis_field,
@@ -1079,12 +1119,6 @@ static void start_analysis(GuiApp *app, int view)
         set_error(app, "Cannot configure the field summary");
         return;
     }
-    now = time(NULL);
-    local_time = localtime(&now);
-    config.syslog_year = app->syslog_year != 0 ? app->syslog_year :
-        (local_time != NULL ? (unsigned)(local_time->tm_year + 1900) : 0);
-    config.syslog_timezone_offset_seconds =
-        app->syslog_timezone_offset_seconds;
     stats_set_timestamp_config(&app->analysis_stats, &config);
     app->analysis_input = open_utf8_file(app->path);
     if (app->analysis_input == NULL ||
@@ -1145,6 +1179,19 @@ static void process_analysis_slice(GuiApp *app)
                 continue;
             }
             close_analysis(app);
+            app->analysis_cache_valid =
+                app->analysis_run_generation == app->analysis_generation;
+            if (app->analysis_cache_valid) {
+                app->analysis_cache_generation = app->analysis_generation;
+                app->analysis_cache_format = app->format;
+                app->analysis_cache_year =
+                    app->analysis_stats.timestamp_config.syslog_year;
+                app->analysis_cache_timezone_offset_seconds =
+                    app->analysis_stats.timestamp_config
+                        .syslog_timezone_offset_seconds;
+                SDL_strlcpy(app->analysis_cache_field, app->analysis_field,
+                            sizeof(app->analysis_cache_field));
+            }
             SDL_strlcpy(app->status, app->analysis_stats.has_timestamp ?
                         "Analysis complete" :
                         "Analysis complete; no supported timestamps",
@@ -1696,6 +1743,7 @@ static int record_matches_queries(GuiApp *app, LogEntry *entry,
 static void start_scan(GuiApp *app)
 {
     char status[256];
+    invalidate_analysis_cache(app);
     close_export(app);
     close_analysis(app);
     close_level_navigation(app);
@@ -2123,6 +2171,7 @@ static void process_follow_slice(GuiApp *app)
         SDL_strlcpy(app->status, "Log rotated or truncated; rescanning",
                     sizeof(app->status));
     } else if (result == FOLLOW_READY) {
+        invalidate_analysis_cache(app);
         app->follow_waiting = 0;
         app->follow_pending_partial = 0;
         app->scanning = 1;

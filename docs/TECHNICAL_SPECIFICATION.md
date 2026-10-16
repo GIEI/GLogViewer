@@ -1,7 +1,7 @@
 # Technical Specification
 
 **Project:** GLogViewer (`logview`)  
-**Status:** Version 1.9.1 adds separate GUI archives for Windows, Linux, and macOS with SDL3 runtime files and launch scripts. The CLI/TUI packages remain independent of SDL3. Linux GUI packages require host graphics/audio libraries; the macOS package targets arm64. See [validation notes](VALIDATION.md).
+**Status:** Version 1.9.2 caches completed GUI field summaries and time histograms in memory for the current session; a new scan or followed record invalidates the cache. Version 1.9.1 adds separate GUI archives for Windows, Linux, and macOS with SDL3 runtime files and launch scripts. The CLI/TUI packages remain independent of SDL3. Linux GUI packages require host graphics/audio libraries; the macOS package targets arm64. See [validation notes](VALIDATION.md).
 **Language:** C99; all repository content is English.
 
 ## 1. Purpose and scope
