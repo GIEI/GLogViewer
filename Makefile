@@ -8,6 +8,7 @@ GUI_TARGET = $(BUILD_DIR)/logview-gui
 GUI_SOURCES = src/gui.c src/gui_nuklear.c src/reader.c src/follow.c src/search_query.c src/json_pretty.c src/jsonl.c src/parsers.c src/filter.c src/output.c src/stats.c src/regex.c
 SDL3_CFLAGS ?= $(shell pkg-config --cflags sdl3 2>/dev/null)
 SDL3_LIBS ?= $(shell pkg-config --libs sdl3 2>/dev/null)
+GUI_EXTRA_LIBS ?= -lm
 
 .PHONY: all clean test gui
 
@@ -23,7 +24,7 @@ test: $(TARGET)
 gui:
 	pkg-config --exists sdl3
 	mkdir -p $(BUILD_DIR)
-	$(CC) -Iinclude -Isrc -Ithird_party/nuklear $(SDL3_CFLAGS) $(CFLAGS) $(GUI_SOURCES) -o $(GUI_TARGET) $(SDL3_LIBS)
+	$(CC) -Iinclude -Isrc -Ithird_party/nuklear $(SDL3_CFLAGS) $(CFLAGS) $(GUI_SOURCES) -o $(GUI_TARGET) $(SDL3_LIBS) $(GUI_EXTRA_LIBS)
 
 clean:
 	rm -f $(TARGET) $(GUI_TARGET)
